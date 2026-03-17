@@ -127,13 +127,22 @@ export async function GET(
   y -= 10
   page.drawText('www.northann.com', { x: M, y, font: fontR, size: 8, color: darkGray })
 
-  // Logo (right side)
+  // Logo (right side) - fetch and embed actual Northann logo
   const lx = width - M - 120
   const ly = height - 78
-  page.drawEllipse({ x: lx + 18, y: ly + 18, xScale: 20, yScale: 20, borderColor: black, borderWidth: 1.2 })
-  page.drawText('n', { x: lx + 10, y: ly + 10, font: fontB, size: 18, color: black })
-  page.drawText('northann', { x: lx + 44, y: ly + 14, font: fontB, size: 14, color: black })
-  page.drawText('SUSTAINABLE INNOVATION', { x: lx + 44, y: ly + 3, font: fontR, size: 5.5, color: medGray })
+  try {
+    const logoRes = await fetch('https://dl.dropboxusercontent.com/scl/fi/96dazjf2coj8wd2yk97x1/logo-northann.jpg?rlkey=h2yzlac1rbxuzc38fomax8wk2')
+    if (logoRes.ok) {
+      const logoBytes = await logoRes.arrayBuffer()
+      const logoImage = await pdfDoc.embedJpg(logoBytes)
+      page.drawImage(logoImage, { x: lx, y: ly - 18, width: 120, height: 52 })
+    } else { throw new Error('logo fetch failed') }
+  } catch (_e) {
+    page.drawEllipse({ x: lx + 18, y: ly + 18, xScale: 20, yScale: 20, borderColor: black, borderWidth: 1.2 })
+    page.drawText('n', { x: lx + 10, y: ly + 10, font: fontB, size: 18, color: black })
+    page.drawText('northann', { x: lx + 44, y: ly + 14, font: fontB, size: 14, color: black })
+    page.drawText('SUSTAINABLE INNOVATION', { x: lx + 44, y: ly + 3, font: fontR, size: 5.5, color: medGray })
+  }
 
   // ── TITLE ────────────────────────────────────────────────
   y = height - 130
