@@ -96,7 +96,7 @@ export async function GET(
   page.drawText(footer, { x: (width - footW) / 2, y: 28, size: 7.5, font: fontR, color: gray })
 
   const pdfBytes = await pdfDoc.save()
-  return new Response(pdfBytes, {
+  return new Response(pdfBytes.buffer as ArrayBuffer, {
     headers: {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="PO-${po.po_number}.pdf"`,
