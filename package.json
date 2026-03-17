@@ -9,11 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "14.2.5",
-    "react": "^18",
-    "react-dom": "^18",
     "lucide-react": "^0.383.0",
-    "node-fetch": "^3.3.2"
+    "next": "14.2.5",
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^1.1.1",
+    "react": "^18",
+    "react-dom": "^18"
   },
   "devDependencies": {
     "typescript": "^5",
@@ -24,6 +25,7 @@
     "postcss": "^8",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
-    "eslint-config-next": "14.2.5"
+    "eslint-config-next": "14.2.5",
+    "@types/pdf-parse": "^1.1.4"
   }
 }
