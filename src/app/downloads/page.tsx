@@ -3,7 +3,7 @@ import { Download, FileText, ArrowLeft, Package } from 'lucide-react'
 import { ALL_POS } from '@/lib/po-data'
 
 export default function DownloadsPage() {
-  const vendors = [...new Set(ALL_POS.map(p => p.vendor))].sort()
+  const vendors = Array.from(new Set(ALL_POS.map(p => p.vendor))).sort()
   const totalValue = ALL_POS.reduce((s, p) => s + p.total_amount, 0)
 
   return (
