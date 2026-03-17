@@ -94,3 +94,22 @@ export async function listPurchaseOrders() {
 
   return response.json()
 }
+
+export async function getPurchaseOrderByDocNumber(docNumber: string) {
+  const accessToken = await getAccessToken()
+  const realmId = process.env.QBO_REALM_ID!
+  const safe = docNumber.replace(/'/g, "\\'")
+  const query = encodeURIComponent(`SELECT * FROM PurchaseOrder WHERE DocNumber = '${safe}' MAXRESULTS 1`)
+  const response = await fetch(`${QBO_BASE_URL}/${realmId}/query?query=${query}&minorversion=65`, {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Accept': 'application/json',
+    },
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`QuickBooks API error: ${text}`)
+  }
+  const data = await response.json()
+  return data.QueryResponse?.PurchaseOrder?.[0] ?? null
+}
