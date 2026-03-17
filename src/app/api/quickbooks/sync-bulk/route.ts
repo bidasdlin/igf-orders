@@ -15,10 +15,10 @@ async function getAccessToken() {
   return data.access_token
 }
 
-async function qbQuery(token: string, query: string) {
-  const url = `${QB_BASE}/query?query=${encodeURIComponent(query)}&minorversion=65`
+async function qbFetch(token: string, path: string) {
+  const url = `${QB_BASE}/${path}`
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' } })
-  if (!res.ok) throw new Error(`QB query error: ${await res.text()}`)
+  if (!res.ok) throw new Error(`QB error: ${await res.text()}`)
   return res.json()
 }
 
@@ -32,37 +32,83 @@ async function qbCreate(token: string, entity: string, payload: object) {
   return { ok: res.ok, status: res.status, data: await res.json() }
 }
 
+async function getOrCreateVendor(token: string, name: string, cache: Record<string, string>): Promise<string | null> {
+  const key = name.toLowerCase().trim()
+  if (cache[key]) return cache[key]
+
+  // Fuzzy: first word match
+  for (const [k, id] of Object.entries(cache)) {
+    if (k.includes(key.split(' ')[0]) || key.includes(k.split(' ')[0])) {
+      cache[key] = id
+      return id
+    }
+  }
+
+  // Try exact QB query first (handles already-existing vendors)
+  try {
+    const safe = name.replace(/'/g, "\\'")
+    const q = encodeURIComponent(`SELECT * FROM Vendor WHERE DisplayName = '${safe}' MAXRESULTS 1`)
+    const qRes = await qbFetch(token, `query?query=${q}&minorversion=65`)
+    const existing = qRes?.QueryResponse?.Vendor?.[0]
+    if (existing?.Id) {
+      cache[key] = existing.Id
+      return existing.Id
+    }
+  } catch {}
+
+  // Create vendor
+  const r = await qbCreate(token, 'vendor', { DisplayName: name, CompanyName: name, PrintOnCheckName: name })
+  if (r.ok && r.data?.Vendor?.Id) {
+    cache[key] = r.data.Vendor.Id
+    return r.data.Vendor.Id
+  }
+
+  // If creation failed (e.g. duplicate), do a broader search
+  try {
+    const safe = name.replace(/'/g, "\\'")
+    const q = encodeURIComponent(`SELECT * FROM Vendor WHERE DisplayName LIKE '%${safe.split(' ')[0]}%' MAXRESULTS 5`)
+    const qRes = await qbFetch(token, `query?query=${q}&minorversion=65`)
+    const found = qRes?.QueryResponse?.Vendor?.[0]
+    if (found?.Id) {
+      cache[key] = found.Id
+      return found.Id
+    }
+  } catch {}
+
+  return null
+}
+
 function parseDate(d: string) {
-  // MM/DD/YY -> YYYY-MM-DD
   try {
     const [m, day, y] = d.split('/')
     return `20${y}-${m.padStart(2,'0')}-${day.padStart(2,'0')}`
-  } catch { return '2026-03-17' }
+  } catch { return '2026-04-01' }
 }
 
 export async function POST() {
   try {
     const token = await getAccessToken()
 
-    // Get vendors
-    const vResp = await qbQuery(token, 'SELECT * FROM Vendor MAXRESULTS 100')
-    const qbVendors: Record<string, string> = {}
+    // Fetch all vendors (up to 500)
+    const vResp = await qbFetch(token, `query?query=${encodeURIComponent('SELECT * FROM Vendor MAXRESULTS 500')}&minorversion=65`)
+    const vendorCache: Record<string, string> = {}
     for (const v of vResp?.QueryResponse?.Vendor ?? []) {
-      qbVendors[v.DisplayName.toLowerCase().trim()] = v.Id
+      vendorCache[v.DisplayName.toLowerCase().trim()] = v.Id
     }
 
-    // Get expense account (COGS or first Expense)
+    // Get expense account
     let accountId = '1'
-    const aResp = await qbQuery(token, "SELECT * FROM Account WHERE AccountType = 'Cost of Goods Sold' MAXRESULTS 5")
-    const accts = aResp?.QueryResponse?.Account ?? []
-    if (accts.length > 0) accountId = accts[0].Id
-    else {
-      const aResp2 = await qbQuery(token, "SELECT * FROM Account WHERE AccountType = 'Expense' MAXRESULTS 5")
-      const accts2 = aResp2?.QueryResponse?.Account ?? []
-      if (accts2.length > 0) accountId = accts2[0].Id
-    }
+    try {
+      const aResp = await qbFetch(token, `query?query=${encodeURIComponent("SELECT * FROM Account WHERE AccountType = 'Cost of Goods Sold' MAXRESULTS 5")}&minorversion=65`)
+      const accts = aResp?.QueryResponse?.Account ?? []
+      if (accts.length > 0) accountId = accts[0].Id
+      else {
+        const aResp2 = await qbFetch(token, `query?query=${encodeURIComponent("SELECT * FROM Account WHERE AccountType = 'Expense' MAXRESULTS 5")}&minorversion=65`)
+        const accts2 = aResp2?.QueryResponse?.Account ?? []
+        if (accts2.length > 0) accountId = accts2[0].Id
+      }
+    } catch {}
 
-    // All 53 NDC POs
     const ALL_POS = [
       {"po_number":"0000104670","vendor":"YUANQUANWOOD IND CO.","order_date":"03/12/26","total_amount":17751.55,"freight_term":"DDP-LA","branch":"LA","items":[{"qty":14,"item_code":"AWB1820TEO","description":"48.5x96.5 48 pcs/unit 18mm C-2 White Birch TH EUC OVR"}]},
       {"po_number":"X0000851769","vendor":"Cambodian Golden Pearl Ind","order_date":"03/16/26","total_amount":24562.18,"freight_term":"DDP-SAV","branch":"XA","items":[{"qty":16,"item_code":"APW1822KRO","description":"48.5x96.5 50 pcs/unit 18mm C-2 Prime Wt Birch UV2S CM RW OVR"}]},
@@ -119,33 +165,14 @@ export async function POST() {
       {"po_number":"X0000851766","vendor":"Cambodian Golden Pearl Ind","order_date":"04/22/26","total_amount":22976.26,"freight_term":"DDP-SAV","branch":"XA","items":[{"qty":16,"item_code":"APW1821KRO","description":"48.5x96.5 50 pcs/unit 18mm C-2 Prime Wt Birch UV1S CM RW OVR"}]},
     ]
 
-    const results = { success: [] as string[], failed: [] as string[], vendorMissing: [] as string[] }
+    const results = { success: [] as string[], failed: [] as string[], vendorMissing: [] as string[], vendorErrors: {} as Record<string, string> }
     let totalValue = 0
 
     for (const po of ALL_POS) {
-      const vKey = po.vendor.toLowerCase().trim()
-      let vendorId = qbVendors[vKey]
-
-      // Fuzzy match
-      if (!vendorId) {
-        for (const [k, id] of Object.entries(qbVendors)) {
-          if (k.includes(vKey.split(' ')[0]) || vKey.includes(k.split(' ')[0])) {
-            vendorId = id; break
-          }
-        }
-      }
-
-      // Auto-create vendor if not found
-      if (!vendorId) {
-        const r = await qbCreate(token, 'vendor', { DisplayName: po.vendor })
-        if (r.ok) {
-          vendorId = r.data?.Vendor?.Id
-          qbVendors[vKey] = vendorId
-        }
-      }
-
+      const vendorId = await getOrCreateVendor(token, po.vendor, vendorCache)
       if (!vendorId) {
         results.vendorMissing.push(po.po_number)
+        results.vendorErrors[po.po_number] = `Vendor not found/created: ${po.vendor}`
         continue
       }
 
@@ -175,7 +202,8 @@ export async function POST() {
         results.success.push(po.po_number)
         totalValue += po.total_amount
       } else {
-        results.failed.push(`${po.po_number}:${r.status}`)
+        const errMsg = JSON.stringify(r.data)
+        results.failed.push(`${po.po_number}:${r.status}:${errMsg.substring(0, 80)}`)
       }
     }
 
