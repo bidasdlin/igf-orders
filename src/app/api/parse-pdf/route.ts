@@ -28,11 +28,12 @@ function dedup(val: string): string {
 function fixSlashes(s: string): string {
     return s
       .replace(/([A-Z])\+N([A-Z])/g, '$1+/$2')
-      .replace(/(\d+(?:\.\d+)?mm)N(\d+(?:\.\d+)?mm)/g, '$1/$2')
+      .replace(/(\d+(?:\(\?\)|\.\d+)?mm)N(\d+(?:\(\?\)|\.\d+)?mm)/g, '$1/$2')
       .replace(/\+N-/g, '+/-')
       .replace(/FaceNBack/gi, 'Face/Back')
       .replace(/(\d+(?:\.\d+)?)N(MSF|unit|Unit|m3|sqm|pcs)/g, '$1/$2')
       .replace(/NUnit\b/g, '/Unit')
+      .replace(/(\d+g)N(sqm|m3|MSF)/g, '$1/$2')
 }
 function parseDate(d: string): string {
   try {
@@ -105,6 +106,15 @@ function extractPOData(text: string, fileName: string) {
   while ((tm = totalPattern.exec(text)) !== null) {
     const val = parseFloat(tm[1].replace(/,/g, ''))
     if (val > totalAmount) totalAmount = val
+  }
+  // Fallback: largest comma-separated dollar amount in text (e.g. 16,956.67)
+  if (totalAmount === 0) {
+    const bigAmt = /\b(\d{1,3}(?:,\d{3})+\.\d{2})\b/g
+    let ba: RegExpExecArray | null
+    while ((ba = bigAmt.exec(text)) !== null) {
+      const val = parseFloat(ba[1].replace(/,/g, ''))
+      if (val > totalAmount) totalAmount = val
+    }
   }
 
   // Line Items extraction
