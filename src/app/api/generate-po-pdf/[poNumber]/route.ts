@@ -231,10 +231,10 @@ export async function GET(
     const rate = item.qty > 0 ? item.amount / item.qty : 0
     page.drawText(sanitize(item.itemCode), { x: tDesc, y, font: fontB, size: 9, color: black })
     page.drawText(sanitize(`${item.qty.toFixed(2)}/Unit`), { x: tQty, y, font: fontR, size: 9, color: black })
-    page.drawText(sanitize(rate.toLocaleString('en-US'), { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    page.drawText(rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
       { x: tRate, y, font: fontR, size: 9, color: black }
     )
-    page.drawText(sanitize(item.amount.toLocaleString('en-US'), { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    page.drawText(item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
       { x: tAmt, y, font: fontR, size: 9, color: black }
     )
     y -= 13
