@@ -27,6 +27,7 @@ interface ParsedPO {
   qbId?: string
   qbDocNumber?: string
   error?: string
+  syncedAt?: string
 }
 
 export function IGFPOProcessor() {
@@ -89,7 +90,7 @@ export function IGFPOProcessor() {
       const data = await res.json()
       if (data.success) {
         setOrders(prev => prev.map(o =>
-          o.id === order.id ? { ...o, status: 'synced', qbId: data.purchaseOrder.id, qbDocNumber: data.purchaseOrder.docNumber } : o
+          o.id === order.id ? { ...o, status: 'synced', qbId: data.purchaseOrder.id, qbDocNumber: data.purchaseOrder.docNumber, syncedAt: new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) + ' PST' } : o
         ))
       } else throw new Error(data.error)
     } catch (err) {
@@ -256,9 +257,15 @@ export function IGFPOProcessor() {
                   </table>
                   {order.notes && <p className="mt-3 text-xs text-gray-500 bg-white rounded-lg px-3 py-2 border border-gray-100">{order.notes}</p>}
                   {order.qbId && (
-                    <div className="mt-3 flex items-center gap-3">
-                      <a href={`https://qbo.intuit.com/app/purchaseorder?txnId=${order.qbId}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">View in QuickBooks →</a>
-                      {order.qbDocNumber && <span className="text-xs text-gray-400">QB #{order.qbDocNumber}</span>}
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-center gap-3">
+                        <a href={`/api/generate-po-pdf/${order.qbDocNumber}`} target="_blank" rel="noopener noreferrer" className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-1.5 rounded-lg">↓ Download PDF</a>
+                        {order.syncedAt && <span className="text-xs text-gray-400">Generated: {order.syncedAt}</span>}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <a href={`https://qbo.intuit.com/app/purchaseorder?txnId=${order.qbId}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">View in QuickBooks →</a>
+                        {order.qbDocNumber && <span className="text-xs text-gray-400">QB #{order.qbDocNumber}</span>}
+                      </div>
                     </div>
                   )}
                 </div>
