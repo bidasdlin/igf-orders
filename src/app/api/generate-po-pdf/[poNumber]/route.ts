@@ -24,8 +24,7 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
 function sanitize(s: string): string {
   // Keep printable ASCII + Latin-1 Supplement + common Windows-1252 extras
   // Replace anything else (e.g. U+1100 Hangul, etc.) with '?'
-  return s.replace(/[^\x20-\x7E\u00A0-\u00FF\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u20AC]/g, '?')
-}
+  return s.replace(/[^\x0A\x0D\x20-\x7E\u00A0-\u00FF\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u20AC]/g, '?')}
 
 function parseQBDescription(desc: string): { qty: number; itemCode: string; description: string } {
   const dashIdx = desc.indexOf(' — ')
