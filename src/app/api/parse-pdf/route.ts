@@ -25,6 +25,15 @@ function dedup(val: string): string {
   return val
 }
 
+function fixSlashes(s: string): string {
+    return s
+      .replace(/([A-Z])\+N([A-Z])/g, '$1+/$2')
+      .replace(/(\d+(?:\.\d+)?mm)N(\d+(?:\.\d+)?mm)/g, '$1/$2')
+      .replace(/\+N-/g, '+/-')
+      .replace(/FaceNBack/gi, 'Face/Back')
+      .replace(/(\d+(?:\.\d+)?)N(MSF|unit|Unit|m3|sqm|pcs)/g, '$1/$2')
+      .replace(/NUnit\b/g, '/Unit')
+}
 function parseDate(d: string): string {
   try {
     const normalized = d.replace(/N/g, '/')
@@ -117,9 +126,8 @@ function extractPOData(text: string, fileName: string) {
       qty = parseInt(rawQty)
     }
 
-    const rawCode = match[2].replace(/\d+$/, '')
-    const itemCode = rawCode.replace(/[^A-Z0-9]/gi, '') || rawCode
-
+        const rawCode = match[2].replace(/\d{3,}[\d.]*[N\/][A-Z0-9]*$/, '').replace(/\d+$/, '')
+            const itemCode = rawCode.replace(/[^A-Z0-9]/gi, '') || rawCode
     const lineEnd = text.indexOf('\n', match.index)
     const lineText = text.substring(match.index, lineEnd > 0 ? lineEnd : text.length)
 
@@ -171,9 +179,8 @@ function extractPOData(text: string, fileName: string) {
       postSpec.push(t)
     }
 
-    const specBody = [...preSpec, ...postSpec].join('\n')
-    const description = specBody
-      ? `${qty} Units ${itemCode} — ${specBody}`
+        const specBody = fixSlashes([...preSpec, ...postSpec].join('\n'))
+                  const description = specBody? `${qty} Units ${itemCode} — ${specBody}`
       : `${qty} Units ${itemCode}`
 
     lineItems.push({ description, quantity: qty, unitPrice, amount })
