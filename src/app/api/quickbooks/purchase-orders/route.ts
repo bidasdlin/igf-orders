@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   createPurchaseOrder,
   listPurchaseOrders,
+  getPurchaseOrderByDocNumber,
   type IGFPurchaseOrder,
 } from '@/lib/quickbooks'
 
@@ -39,7 +40,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const qbPO = await createPurchaseOrder(body)
+    // Try to create; if duplicate DocNumber, fetch the existing PO and return success
+    let qbPO
+    try {
+      qbPO = await createPurchaseOrder(body)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
+      // QB error code 6140 = Duplicate Document Number
+      if (msg.includes('6140') || msg.includes('Duplicate Document Number')) {
+        const existing = await getPurchaseOrderByDocNumber(body.poNumber)
+        if (existing) {
+          return NextResponse.json({
+            success: true,
+            alreadyExists: true,
+            purchaseOrder: {
+              id: existing.Id,
+              docNumber: existing.DocNumber,
+              status: existing.POStatus,
+              totalAmount: existing.TotalAmt,
+              vendor: existing.VendorRef.name,
+              date: existing.TxnDate,
+            },
+          })
+        }
+      }
+      throw err
+    }
 
     return NextResponse.json({
       success: true,
