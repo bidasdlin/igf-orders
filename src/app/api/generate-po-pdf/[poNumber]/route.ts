@@ -86,6 +86,19 @@ export async function GET(
   }
   if (!qbPO) return new Response('PO not found in QuickBooks', { status: 404 })
 
+  // Deep-sanitize all string fields from QB before PDF generation
+  function deepSanitize(obj: unknown): unknown {
+    if (typeof obj === 'string') return sanitize(obj)
+    if (Array.isArray(obj)) return obj.map(deepSanitize)
+    if (obj && typeof obj === 'object') {
+      const r: Record<string, unknown> = {}
+      for (const k of Object.keys(obj as object)) r[k] = deepSanitize((obj as Record<string,unknown>)[k])
+      return r
+    }
+    return obj
+  }
+  qbPO = deepSanitize(qbPO) as Record<string, unknown>
+
   type VendorRef = { name?: string }
   const vendorName = (qbPO.VendorRef as VendorRef)?.name ?? 'Unknown Vendor'
   const txnDate = (qbPO.TxnDate as string) ?? ''
