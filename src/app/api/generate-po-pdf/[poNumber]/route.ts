@@ -20,6 +20,12 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
   return lines
 }
 
+function sanitize(s: string): string {
+  // Keep printable ASCII + Latin-1 Supplement + common Windows-1252 extras
+  // Replace anything else (e.g. U+1100 Hangul, etc.) with '?'
+  return s.replace(/[^\x20-\x7E\u00A0-\u00FF\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u20AC]/g, '?')
+}
+
 function parseQBDescription(desc: string): { qty: number; itemCode: string; description: string } {
   const dashIdx = desc.indexOf(' — ')
   const header = dashIdx >= 0 ? desc.substring(0, dashIdx) : desc
@@ -136,15 +142,15 @@ export async function GET(
   const W = width - M * 2
 
   let y = height - 48
-  page.drawText('NORTHANN DISTRIBUTION CENTER', { x: M, y, font: fontB, size: 10, color: black })
+  page.drawText(sanitize('NORTHANN DISTRIBUTION CENTER'), { x: M, y, font: fontB, size: 10, color: black })
   y -= 13
-  page.drawText('INC.', { x: M, y, font: fontB, size: 10, color: black })
+  page.drawText(sanitize('INC.'), { x: M, y, font: fontB, size: 10, color: black })
   y -= 13
   page.drawText('9820 Dino Dr Ste 110 Elk Grove, CA 95624', { x: M, y, font: fontR, size: 8, color: darkGray })
   y -= 10
-  page.drawText('financial@northann.com', { x: M, y, font: fontR, size: 8, color: darkGray })
+  page.drawText(sanitize('financial@northann.com'), { x: M, y, font: fontR, size: 8, color: darkGray })
   y -= 10
-  page.drawText('www.northann.com', { x: M, y, font: fontR, size: 8, color: darkGray })
+  page.drawText(sanitize('www.northann.com'), { x: M, y, font: fontR, size: 8, color: darkGray })
 
   const lx = width - M - 120
   const ly = height - 78
@@ -159,39 +165,39 @@ export async function GET(
     } else { throw new Error('logo') }
   } catch (_e) {
     page.drawEllipse({ x: lx + 18, y: ly + 18, xScale: 20, yScale: 20, borderColor: black, borderWidth: 1.2 })
-    page.drawText('n', { x: lx + 10, y: ly + 10, font: fontB, size: 18, color: black })
-    page.drawText('northann', { x: lx + 44, y: ly + 14, font: fontB, size: 14, color: black })
-    page.drawText('SUSTAINABLE INNOVATION', { x: lx + 44, y: ly + 3, font: fontR, size: 5.5, color: medGray })
+    page.drawText(sanitize('n'), { x: lx + 10, y: ly + 10, font: fontB, size: 18, color: black })
+    page.drawText(sanitize('northann'), { x: lx + 44, y: ly + 14, font: fontB, size: 14, color: black })
+    page.drawText(sanitize('SUSTAINABLE INNOVATION'), { x: lx + 44, y: ly + 3, font: fontR, size: 5.5, color: medGray })
   }
 
   y = height - 130
-  page.drawText('Purchase Order', { x: M, y, font: fontR, size: 20, color: lightGray })
+  page.drawText(sanitize('Purchase Order'), { x: M, y, font: fontR, size: 20, color: lightGray })
   y -= 10
   page.drawLine({ start: { x: M, y }, end: { x: width - M, y }, thickness: 0.4, color: lightGray })
 
   y -= 18
   const c1 = M, c2 = M + 180, c3 = M + 380, c4 = M + 420
 
-  page.drawText('VENDOR', { x: c1, y, font: fontR, size: 7, color: medGray })
-  page.drawText('SHIP TO', { x: c2, y, font: fontR, size: 7, color: medGray })
-  page.drawText('P.O.', { x: c3, y, font: fontR, size: 7, color: medGray })
+  page.drawText(sanitize('VENDOR'), { x: c1, y, font: fontR, size: 7, color: medGray })
+  page.drawText(sanitize('SHIP TO'), { x: c2, y, font: fontR, size: 7, color: medGray })
+  page.drawText(sanitize('P.O.'), { x: c3, y, font: fontR, size: 7, color: medGray })
   const poRef = getVendorCode(vendorName) + '-IGF-' + docNumber.replace(/^0+/, '')
-  page.drawText(poRef, { x: c4, y, font: fontR, size: 9, color: black })
+  page.drawText(sanitize(poRef), { x: c4, y, font: fontR, size: 9, color: black })
 
   y -= 13
-  page.drawText(vendorName, { x: c1, y, font: fontR, size: 9, color: black })
-  page.drawText(shipTo, { x: c2, y, font: fontR, size: 9, color: black })
-  page.drawText('DATE', { x: c3, y, font: fontR, size: 7, color: medGray })
-  page.drawText(orderDate, { x: c4, y, font: fontR, size: 9, color: black })
+  page.drawText(sanitize(vendorName), { x: c1, y, font: fontR, size: 9, color: black })
+  page.drawText(sanitize(shipTo), { x: c2, y, font: fontR, size: 9, color: black })
+  page.drawText(sanitize('DATE'), { x: c3, y, font: fontR, size: 7, color: medGray })
+  page.drawText(sanitize(orderDate), { x: c4, y, font: fontR, size: 9, color: black })
 
   y -= 13
-  if (freightTerm) page.drawText(freightTerm, { x: c1, y, font: fontR, size: 8, color: darkGray })
+  if (freightTerm) page.drawText(sanitize(freightTerm), { x: c1, y, font: fontR, size: 8, color: darkGray })
 
   y -= 22
-  page.drawText('DESTINATION', { x: c1, y, font: fontR, size: 7, color: medGray })
-  page.drawText('PO NUMBER', { x: c2, y, font: fontR, size: 7, color: medGray })
+  page.drawText(sanitize('DESTINATION'), { x: c1, y, font: fontR, size: 7, color: medGray })
+  page.drawText(sanitize('PO NUMBER'), { x: c2, y, font: fontR, size: 7, color: medGray })
   y -= 13
-  page.drawText(shipTo, { x: c1, y, font: fontR, size: 9, color: black })
+  page.drawText(sanitize(shipTo), { x: c1, y, font: fontR, size: 9, color: black })
   page.drawText(docNumber.replace(/^0+/, ''), { x: c2, y, font: fontR, size: 9, color: black })
 
   y -= 22
@@ -199,30 +205,28 @@ export async function GET(
 
   const tDesc = M, tQty = M + 258, tRate = M + 328, tAmt = M + 398, tLoad = M + 472
 
-  page.drawText('QTY', { x: tQty, y: y + 2, font: fontB, size: 8, color: black })
-  page.drawText('RATE', { x: tRate, y: y + 2, font: fontB, size: 8, color: black })
-  page.drawText('AMOUNT', { x: tAmt, y: y + 2, font: fontB, size: 8, color: black })
-  page.drawText('LOADING', { x: tLoad, y: y + 2, font: fontB, size: 8, color: black })
+  page.drawText(sanitize('QTY'), { x: tQty, y: y + 2, font: fontB, size: 8, color: black })
+  page.drawText(sanitize('RATE'), { x: tRate, y: y + 2, font: fontB, size: 8, color: black })
+  page.drawText(sanitize('AMOUNT'), { x: tAmt, y: y + 2, font: fontB, size: 8, color: black })
+  page.drawText(sanitize('LOADING'), { x: tLoad, y: y + 2, font: fontB, size: 8, color: black })
 
   y -= 22
 
   const descMaxW = 248
   for (const item of items) {
     const rate = item.qty > 0 ? item.amount / item.qty : 0
-    page.drawText(item.itemCode, { x: tDesc, y, font: fontB, size: 9, color: black })
-    page.drawText(`${item.qty.toFixed(2)}/Unit`, { x: tQty, y, font: fontR, size: 9, color: black })
-    page.drawText(
-      rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    page.drawText(sanitize(item.itemCode), { x: tDesc, y, font: fontB, size: 9, color: black })
+    page.drawText(sanitize(`${item.qty.toFixed(2)}/Unit`), { x: tQty, y, font: fontR, size: 9, color: black })
+    page.drawText(sanitize(rate.toLocaleString('en-US'), { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
       { x: tRate, y, font: fontR, size: 9, color: black }
     )
-    page.drawText(
-      item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    page.drawText(sanitize(item.amount.toLocaleString('en-US'), { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
       { x: tAmt, y, font: fontR, size: 9, color: black }
     )
     y -= 13
     const descLines = wrapText(item.description, fontR, 9, descMaxW)
     for (const line of descLines) {
-      page.drawText(line, { x: tDesc, y, font: fontR, size: 9, color: black })
+      page.drawText(sanitize(line), { x: tDesc, y, font: fontR, size: 9, color: black })
       y -= 12
     }
     y -= 6
@@ -240,26 +244,26 @@ export async function GET(
     const noteLines = wrapText(weightNote, fontR, 6.5, 195)
     let ny = y
     for (const line of noteLines) {
-      page.drawText(line, { x: M, y: ny, font: fontR, size: 6.5, color: medGray })
+      page.drawText(sanitize(line), { x: M, y: ny, font: fontR, size: 6.5, color: medGray })
       ny -= 9
     }
   }
 
-  page.drawText('TOTAL', { x: tAmt - 38, y, font: fontB, size: 9, color: black })
+  page.drawText(sanitize('TOTAL'), { x: tAmt - 38, y, font: fontB, size: 9, color: black })
   const totalStr = 'USD ' + totalAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const totalW = fontB.widthOfTextAtSize(totalStr, 10)
-  page.drawText(totalStr, { x: width - M - totalW, y, font: fontB, size: 10, color: black })
+  page.drawText(sanitize(totalStr), { x: width - M - totalW, y, font: fontB, size: 10, color: black })
 
   y -= 48
-  page.drawText('Approved By', { x: M, y, font: fontR, size: 9, color: black })
+  page.drawText(sanitize('Approved By'), { x: M, y, font: fontR, size: 9, color: black })
   page.drawLine({ start: { x: M + 72, y: y - 2 }, end: { x: width - M, y: y - 2 }, thickness: 0.5, color: black })
   y -= 28
-  page.drawText('Date', { x: M, y, font: fontR, size: 9, color: black })
+  page.drawText(sanitize('Date'), { x: M, y, font: fontR, size: 9, color: black })
   page.drawLine({ start: { x: M + 72, y: y - 2 }, end: { x: width - M, y: y - 2 }, thickness: 0.5, color: black })
 
-  page.drawText('Page 1 of 1', { x: width / 2 - 26, y: 22, font: fontR, size: 8, color: medGray })
+  page.drawText(sanitize('Page 1 of 1'), { x: width / 2 - 26, y: 22, font: fontR, size: 8, color: medGray })
   const genTime = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-  page.drawText('Generated: ' + genTime + ' PST', { x: width - M - 160, y: 22, font: fontR, size: 7, color: medGray })
+  page.drawText(sanitize('Generated: ' + genTime + ' PST'), { x: width - M - 160, y: 22, font: fontR, size: 7, color: medGray })
 
   const pdfBytes = await pdfDoc.save()
   return new Response(pdfBytes.buffer as ArrayBuffer, {
