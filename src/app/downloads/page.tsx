@@ -1,123 +1,115 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Download, FileText, ArrowLeft, Package, ChevronDown } from 'lucide-react'
-import { ALL_POS } from '@/lib/po-data'
+import { Download, FileText, ArrowLeft, Clock } from 'lucide-react'
 
-type SortMode = 'vendor' | 'processed' | 'port'
+interface SyncedPO {
+  poNumber: string
+  vendorName: string
+  shipTo: string
+  totalAmount: number
+  qbId?: string
+  qbDocNumber?: string
+  syncedAt?: string
+}
 
 export default function DownloadsPage() {
-  const [sortMode, setSortMode] = useState<SortMode>('vendor')
+  const [pos, setPos] = useState<SyncedPO[]>([])
+  const [loaded, setLoaded] = useState(false)
 
-  const totalValue = ALL_POS.reduce((s, p) => s + p.total_amount, 0)
-
-  // Build groups based on sort mode
-  let groupsMap: Map<string, typeof ALL_POS>
-  let groupKeys: string[]
-
-  if (sortMode === 'processed') {
-    // Reverse insertion order — most recently processed PO appears first
-    groupsMap = new Map([['All Orders · Most Recent First', [...ALL_POS].reverse()]])
-    groupKeys = ['All Orders · Most Recent First']
-  } else {
-    groupsMap = new Map<string, typeof ALL_POS>()
-    for (const po of ALL_POS) {
-      const key = sortMode === 'vendor' ? po.vendor : po.freight_term
-      if (!groupsMap.has(key)) groupsMap.set(key, [])
-      groupsMap.get(key)!.push(po)
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('igf_synced_pos') || '[]')
+      setPos(stored)
+    } catch (_) {
+      setPos([])
     }
-    groupKeys = Array.from(groupsMap.keys()).sort((a, b) => a.localeCompare(b))
-  }
+    setLoaded(true)
+  }, [])
+
+  const totalValue = pos.reduce((s, p) => s + (p.totalAmount || 0), 0)
 
   return (
-    <main className="max-w-5xl mx-auto py-8 px-4">
+    <main className="max-w-4xl mx-auto py-8 px-4">
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">IGF Purchase Orders</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Processed POs</h1>
           <p className="text-gray-500 mt-1">
-            {ALL_POS.length} POs &nbsp;·&nbsp; Total:{' '}
-            <span className="font-semibold text-gray-700">
-              ${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </span>
+            {loaded ? (
+              pos.length > 0
+                ? <>{pos.length} PO{pos.length !== 1 ? 's' : ''} &nbsp;·&nbsp; Total: <span className="font-semibold text-gray-700">${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></>
+                : 'No POs processed yet in this browser'
+            ) : 'Loading…'}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <select
-              value={sortMode}
-              onChange={e => setSortMode(e.target.value as SortMode)}
-              className="appearance-none bg-white border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
-            >
-              <option value="vendor">By Vendor</option>
-              <option value="processed">By Date Processed</option>
-              <option value="port">By Port</option>
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-          </div>
-          <Link href="/" className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800">
-            <ArrowLeft className="w-4 h-4" />
-            Back to Processing
-          </Link>
-        </div>
+        <Link href="/" className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800">
+          <ArrowLeft className="w-4 h-4" />
+          Back to Processing
+        </Link>
       </div>
 
-      {groupKeys.map(groupName => {
-        const pos = groupsMap.get(groupName)!
-        const groupTotal = pos.reduce((s, p) => s + p.total_amount, 0)
-        return (
-          <div key={groupName} className="mb-5 bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-            <div className="bg-gray-50 px-5 py-3 flex items-center justify-between border-b border-gray-200">
-              <div className="flex items-center gap-2">
-                <Package className="w-4 h-4 text-gray-400" />
-                <span className="font-semibold text-gray-800">{groupName}</span>
-                <span className="text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded-full">
-                  {pos.length} PO{pos.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-              <span className="text-sm font-medium text-gray-600">
-                ${groupTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {pos.map(po => (
-                <div key={po.po_number} className="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <FileText className="w-4 h-4 text-gray-300 shrink-0" />
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                      <span className="font-mono font-semibold text-gray-800">{po.po_number}</span>
-                      <span className="text-gray-300">·</span>
-                      <span className="text-gray-500">{po.order_date}</span>
-                      <span className="text-gray-300">·</span>
-                      <span className="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full">{po.freight_term}</span>
-                      {sortMode !== 'vendor' && (
-                        <>
-                          <span className="text-gray-300">·</span>
-                          <span className="text-xs text-gray-500">{po.vendor}</span>
-                        </>
-                      )}
-                      <span className="text-gray-300">·</span>
-                      <span className="text-xs text-gray-500">{po.items[0].item_code}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4 shrink-0 ml-4">
-                    <span className="text-sm font-medium text-gray-700 hidden sm:block">
-                      ${po.total_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </span>
-                    <a
-                      href={`/api/generate-po-pdf/${po.po_number}`}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors"
-                    >
-                      <Download className="w-3 h-3" />
-                      PDF
-                    </a>
-                  </div>
-                </div>
-              ))}
-            </div>
+      {loaded && pos.length === 0 && (
+        <div className="text-center py-20 bg-white rounded-xl border border-gray-200">
+          <FileText className="w-12 h-12 mx-auto mb-4 text-gray-200" />
+          <p className="text-gray-500 font-medium">No processed POs yet</p>
+          <p className="text-sm text-gray-400 mt-1">Process and sync a PO to QuickBooks — it will appear here automatically.</p>
+          <Link href="/" className="inline-flex items-center gap-2 mt-5 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg">
+            Go process a PO
+          </Link>
+        </div>
+      )}
+
+      {loaded && pos.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+          <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-4 px-5 py-3 bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            <span>PO Number</span>
+            <span>Vendor</span>
+            <span>Ship To</span>
+            <span className="text-right">Amount</span>
           </div>
-        )
-      })}
+          {pos.map((po, i) => (
+            <div key={po.poNumber + i} className="flex items-center px-5 py-4 gap-3 hover:bg-gray-50 transition-colors">
+              <div className="flex-1 grid grid-cols-[1fr_1fr_1fr_auto] gap-4 min-w-0 items-center">
+                <div className="min-w-0">
+                  <p className="font-mono text-sm font-semibold text-gray-900 truncate">{po.poNumber}</p>
+                  {po.syncedAt && (
+                    <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
+                      <Clock className="w-3 h-3" />{po.syncedAt}
+                    </p>
+                  )}
+                </div>
+                <p className="text-sm text-gray-700 truncate">{po.vendorName}</p>
+                <p className="text-sm text-gray-500 truncate">{po.shipTo}</p>
+                <p className="text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
+                  ${(po.totalAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 ml-2">
+                <a
+                  href={`/api/generate-po-pdf/${po.qbDocNumber || po.poNumber}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  <Download className="w-3 h-3" />
+                  PDF
+                </a>
+                {po.qbId && (
+                  <a
+                    href={`https://qbo.intuit.com/app/purchaseorder?txnId=${po.qbId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline whitespace-nowrap"
+                  >
+                    QB →
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </main>
   )
 }
