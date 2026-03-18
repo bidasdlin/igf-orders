@@ -89,12 +89,13 @@ function extractPOData(text: string, fileName: string) {
     else orderDate = new Date().toISOString().split('T')[0]
   }
 
-  // Total Amount extraction
+  // Total Amount extraction — find the largest value on any Total/Subtotal line
   let totalAmount = 0
-  const totalMatch = text.match(/Total\s+\$?([\d,]+\.?\d*)\$?([\d,]+\.?\d*)/i)
-  if (totalMatch) {
-    const raw = totalMatch[1].replace(/,/g, '')
-    totalAmount = parseFloat(raw) || 0
+  const totalPattern = /(?:Sub)?total[^\n]*\$?([\d,]+\.\d{2})/gi
+  let tm: RegExpExecArray | null
+  while ((tm = totalPattern.exec(text)) !== null) {
+    const val = parseFloat(tm[1].replace(/,/g, ''))
+    if (val > totalAmount) totalAmount = val
   }
 
   // Line Items extraction
@@ -124,12 +125,11 @@ function extractPOData(text: string, fileName: string) {
 
     const amount = totalAmount
 
-    const priceMatches = lineText.match(/(\d+\.\d{2})[N\/]/g)
-    const lastPrice = priceMatches ? priceMatches[priceMatches.length - 1] : null
-    const priceMatch = lastPrice ? lastPrice.match(/(\d+\.\d{2})/) : null
-    const unitPrice = priceMatch
-      ? parseFloat(priceMatch[1])
-      : (qty > 0 ? parseFloat((amount / qty).toFixed(2)) : 0)
+    // Always compute unit price as totalAmount/qty.
+    // The IGF PO shows PRICE/UOM in $/MSF (not $/unit), so extracting it
+    // directly would give the wrong per-unit price. Using amount/qty ensures
+    // the vendor PO RATE × QTY = AMOUNT correctly.
+    const unitPrice = qty > 0 ? parseFloat((totalAmount / qty).toFixed(2)) : 0
 
     // ── Pre-item spec: everything between the column-header row and this item ──
     const textBefore = text.substring(0, match.index)
