@@ -81,27 +81,28 @@ function extractPOData(text: string, fileName: string) {
 
   // ── Line Items ─────────────────────────────────────────
   const lineItems: Array<{ description: string; quantity: number; unitPrice: number; amount: number }> = []
-  const itemPattern = /(\d+)\s+UNIT\s+(\w+)\s+([\d,]+\.?\d*)\/([\d,]+\.?\d*)\/\w+\s+([\d,]+\.?\d*)([\d,]+\.?\d*)/g
+  // Format in supplier PDFs: ITEMCODE price/Unit qty total
+  const itemPattern = /^([A-Z][A-Z0-9]+)\s+([\d,]+\.?\d*)\/[Uu]nit\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/gm
   let match
 
   while ((match = itemPattern.exec(text)) !== null) {
-    const qty = parseInt(match[1])
-    const amount = parseFloat(match[5].replace(',', ''))
-    const unitPrice = qty > 0 ? parseFloat((amount / qty).toFixed(2)) : 0
+    const itemCode = match[1]
+    const unitPrice = parseFloat(match[2].replace(',', ''))
+    const qty = parseFloat(match[3].replace(',', ''))
+    const amount = parseFloat(match[4].replace(',', ''))
     const afterMatch = text.substring(match.index + match[0].length)
     // Capture ALL spec lines until next item / TOTAL / end of section
     const specLines: string[] = []
     for (const ln of afterMatch.split('\n')) {
       const t = ln.trim()
       if (!t) continue
-      if (t.match(/^\d+\s+UNIT/i) || t.match(/^(TOTAL|APPROVED|AUTHORIZED|Page)/i)) break
+      if (t.match(/^[A-Z][A-Z0-9]+\s+[\d,]+\.?\d*\/[Uu]nit/) || t.match(/^(TOTAL|APPROVED|AUTHORIZED|Page|MAXIMUM)/i)) break
       specLines.push(t)
     }
-    const itemCode = match[2]
     const specBody = specLines.join('\n')
     const description = specBody
       ? `${qty} Units ${itemCode} — ${specBody}`
-      : `${qty} Units ${itemCode} — Qty: ${qty}`
+      : `${qty} Units ${itemCode}`
     lineItems.push({ description, quantity: qty, unitPrice, amount })
   }
 
