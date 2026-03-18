@@ -41,6 +41,29 @@ function getVendorCode(vendorName: string): string {
 }
 
 function parseMemo(memo: string): { branch: string; freightTerm: string } {
+  // Format 1: "NDC Branch: LA | DDP-LA"
+  const m1 = memo.match(/NDC Branch:\s*(\S+)\s*\|\s*(\S+)/)
+  if (m1) return { branch: m1[1], freightTerm: m1[2] }
+
+  // Format 2: "Customer PO#: XXXX | Ship to: Port of Los Angeles, CA"
+  const shipToM = memo.match(/[Ss]hip to:\s*([^|]+)/i)
+  if (shipToM) {
+    const shipToFull = shipToM[1].trim()
+    const branchMap: Record<string, string> = {
+      'Los Angeles': 'LA', 'Savannah': 'SAV', 'Houston': 'HOU',
+      'New York': 'NY', 'Newark': 'NE', 'Portland': 'VANC',
+      'Seattle': 'SEA', 'Norfolk': 'NOR',
+    }
+    let branch = ''
+    for (const [key, code] of Object.entries(branchMap)) {
+      if (shipToFull.includes(key)) { branch = code; break }
+    }
+    const freightM = memo.match(/\b(DDP|FOB|CIF|CFR|FCA|CPT|CIP|DAP|DPU|EXW)-[A-Z]+\b/)
+    return { branch, freightTerm: freightM?.[0] ?? '' }
+  }
+
+  return { branch: '', freightTerm: '' }
+} {
   const m = memo.match(/NDC Branch:\s*(\S+)\s*\|\s*(\S+)/)
   return { branch: m?.[1] ?? '', freightTerm: m?.[2] ?? '' }
 }
