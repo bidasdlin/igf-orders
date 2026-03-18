@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   createPurchaseOrder,
+  updatePurchaseOrder,
   listPurchaseOrders,
   getPurchaseOrderByDocNumber,
   type IGFPurchaseOrder,
@@ -40,31 +41,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Try to create; if duplicate DocNumber, fetch the existing PO and return success
+    // Try to create; if duplicate DocNumber, update the existing PO with fresh descriptions
     let qbPO
     try {
       qbPO = await createPurchaseOrder(body)
     } catch (err) {
       const msg = err instanceof Error ? err.message : ''
-      // QB error code 6140 = Duplicate Document Number
+      // QB error code 6140 = Duplicate Document Number — update existing instead
       if (msg.includes('6140') || msg.includes('Duplicate Document Number')) {
         const existing = await getPurchaseOrderByDocNumber(body.poNumber)
         if (existing) {
-          return NextResponse.json({
-            success: true,
-            alreadyExists: true,
-            purchaseOrder: {
-              id: existing.Id,
-              docNumber: existing.DocNumber,
-              status: existing.POStatus,
-              totalAmount: existing.TotalAmt,
-              vendor: existing.VendorRef.name,
-              date: existing.TxnDate,
-            },
-          })
+          qbPO = await updatePurchaseOrder(existing, body)
+        } else {
+          throw err
         }
+      } else {
+        throw err
       }
-      throw err
     }
 
     return NextResponse.json({
