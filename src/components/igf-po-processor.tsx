@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react'
 import {
-  Upload, FileText, CheckCircle2,
+  Upload, FileText, CheckCircle2, Download,
   Loader2, Send, Trash2, ChevronDown, ChevronUp, RefreshCw,
 } from 'lucide-react'
 
@@ -28,6 +28,25 @@ interface ParsedPO {
   qbDocNumber?: string
   error?: string
   syncedAt?: string
+}
+
+function saveToHistory(po: ParsedPO) {
+  try {
+    const key = 'igf_synced_pos'
+    const existing = JSON.parse(localStorage.getItem(key) || '[]')
+    // Replace if same PO number already exists, otherwise prepend
+    const filtered = existing.filter((p: { poNumber: string }) => p.poNumber !== po.poNumber)
+    filtered.unshift({
+      poNumber: po.qbDocNumber || po.poNumber,
+      vendorName: po.vendorName,
+      shipTo: po.shipTo,
+      totalAmount: po.totalAmount,
+      qbId: po.qbId,
+      qbDocNumber: po.qbDocNumber,
+      syncedAt: po.syncedAt,
+    })
+    localStorage.setItem(key, JSON.stringify(filtered.slice(0, 500)))
+  } catch (_) { /* localStorage unavailable */ }
 }
 
 export function IGFPOProcessor() {
@@ -89,9 +108,20 @@ export function IGFPOProcessor() {
       })
       const data = await res.json()
       if (data.success) {
-        setOrders(prev => prev.map(o =>
-          o.id === order.id ? { ...o, status: 'synced', qbId: data.purchaseOrder.id, qbDocNumber: data.purchaseOrder.docNumber, syncedAt: new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) + ' PST' } : o
-        ))
+        const syncedAt = new Date().toLocaleString('en-US', {
+          timeZone: 'America/Los_Angeles',
+          month: '2-digit', day: '2-digit', year: '2-digit',
+          hour: '2-digit', minute: '2-digit', hour12: false,
+        }) + ' PST'
+        const updated: ParsedPO = {
+          ...order,
+          status: 'synced',
+          qbId: data.purchaseOrder.id,
+          qbDocNumber: data.purchaseOrder.docNumber,
+          syncedAt,
+        }
+        setOrders(prev => prev.map(o => o.id === order.id ? updated : o))
+        saveToHistory(updated)
       } else throw new Error(data.error)
     } catch (err) {
       setOrders(prev => prev.map(o =>
@@ -143,8 +173,8 @@ export function IGFPOProcessor() {
           'border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 select-none',
           orders.length === 0 ? 'py-20' : 'py-10',
           isDragging ? 'border-blue-400 bg-blue-50 scale-[1.005]'
-            : isProcessing ? 'border-amber-300 bg-amber-50'
-            : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50',
+          : isProcessing ? 'border-amber-300 bg-amber-50'
+          : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50',
         ].join(' ')}
       >
         <input ref={fileInputRef} type="file" accept=".pdf" multiple className="hidden" onChange={handleFiles} />
@@ -213,7 +243,22 @@ export function IGFPOProcessor() {
                     </button>
                   )}
                   {order.status === 'syncing' && <span className="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Syncing</span>}
-                  {order.status === 'synced' && <span className="text-xs bg-emerald-50 text-emerald-700 font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3" /> In QuickBooks</span>}
+                  {order.status === 'synced' && (
+                    <>
+                      <a
+                        href={`/api/generate-po-pdf/${order.qbDocNumber}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <Download className="w-3 h-3" /> Download PDF
+                      </a>
+                      <span className="text-xs bg-emerald-50 text-emerald-700 font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3 h-3" /> In QuickBooks
+                      </span>
+                    </>
+                  )}
                   {order.status === 'error' && (
                     <button onClick={() => syncOrder(order)} title={order.error} className="text-xs bg-red-50 hover:bg-red-100 text-red-600 font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5">
                       <RefreshCw className="w-3 h-3" /> Retry
@@ -257,15 +302,11 @@ export function IGFPOProcessor() {
                   </table>
                   {order.notes && <p className="mt-3 text-xs text-gray-500 bg-white rounded-lg px-3 py-2 border border-gray-100">{order.notes}</p>}
                   {order.qbId && (
-                    <div className="mt-3 space-y-2">
-                      <div className="flex items-center gap-3">
-                        <a href={`/api/generate-po-pdf/${order.qbDocNumber}`} target="_blank" rel="noopener noreferrer" className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-3 py-1.5 rounded-lg">↓ Download PDF</a>
-                        {order.syncedAt && <span className="text-xs text-gray-400">Generated: {order.syncedAt}</span>}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <a href={`https://qbo.intuit.com/app/purchaseorder?txnId=${order.qbId}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">View in QuickBooks →</a>
-                        {order.qbDocNumber && <span className="text-xs text-gray-400">QB #{order.qbDocNumber}</span>}
-                      </div>
+                    <div className="mt-3 space-y-1">
+                      {order.syncedAt && <p className="text-xs text-gray-400">Synced: {order.syncedAt}</p>}
+                      <a href={`https://qbo.intuit.com/app/purchaseorder?txnId=${order.qbId}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+                        View in QuickBooks →{order.qbDocNumber && ` QB #${order.qbDocNumber}`}
+                      </a>
                     </div>
                   )}
                 </div>
