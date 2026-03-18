@@ -81,29 +81,73 @@ function extractPOData(text: string, fileName: string) {
 
   // ── Line Items ─────────────────────────────────────────
   const lineItems: Array<{ description: string; quantity: number; unitPrice: number; amount: number }> = []
-  // Format in supplier PDFs: ITEMCODE price/Unit qty total
-  const itemPattern = /^([A-Z][A-Z0-9]+)\s+([\d,]+\.?\d*)\/[Uu]nit\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/gm
   let match
 
-  while ((match = itemPattern.exec(text)) !== null) {
-    const itemCode = match[1]
-    const unitPrice = parseFloat(match[2].replace(',', ''))
-    const qty = parseFloat(match[3].replace(',', ''))
-    const amount = parseFloat(match[4].replace(',', ''))
+  // Format A — IGF input POs: "{qty} UNIT {itemCode} {qty} {price}/... {total}UNIT"
+  const igfPattern = /^(\d+)\s+UNIT\s+([A-Z][A-Z0-9]+)\s+\d+\s+([\d,]+\.?\d*)\//gm
+  igfPattern.lastIndex = 0
+  let foundIGF = false
+  while ((match = igfPattern.exec(text)) !== null) {
+    foundIGF = true
+    const qty = parseFloat(match[1])
+    const itemCode = match[2]
+    const unitPrice = parseFloat(match[3].replace(',', ''))
+    // Extract total: look for {total}UNIT in the same line
+    const lineEnd = text.indexOf('\n', match.index)
+    const itemLine = text.substring(match.index, lineEnd > 0 ? lineEnd : text.length)
+    const totalInLine = itemLine.match(/([\d,]+\.?\d+)UNIT/)
+    const amount = totalInLine ? parseFloat(totalInLine[1].replace(',', '')) : (unitPrice * qty)
+    // Spec before item (between ITEM/DESCRIPTION header and this item line)
+    const textBefore = text.substring(0, match.index)
+    const headerIdx = textBefore.lastIndexOf('ITEM/DESCRIPTION')
+    const preSpec: string[] = []
+    if (headerIdx >= 0) {
+      for (const ln of textBefore.substring(headerIdx + 16).split('\n')) {
+        const t = ln.trim()
+        if (!t || t.match(/^(QUANTITY|UOM|PRICE|AMOUNT|TOTAL|ITEM)/i)) continue
+        preSpec.push(t)
+      }
+    }
+    // Spec after item (until Subtotal / MAXIMUM / next item)
     const afterMatch = text.substring(match.index + match[0].length)
-    // Capture ALL spec lines until next item / TOTAL / end of section
-    const specLines: string[] = []
+    const postSpec: string[] = []
     for (const ln of afterMatch.split('\n')) {
       const t = ln.trim()
       if (!t) continue
-      if (t.match(/^[A-Z][A-Z0-9]+\s+[\d,]+\.?\d*\/[Uu]nit/) || t.match(/^(TOTAL|APPROVED|AUTHORIZED|Page|MAXIMUM)/i)) break
-      specLines.push(t)
+      if (t.match(/^(Subtotal|MAXIMUM|TOTAL|APPROVED|AUTHORIZED|Page)/i)) break
+      if (t.match(/^\d+\s+UNIT\s+[A-Z]/)) break
+      postSpec.push(t)
     }
-    const specBody = specLines.join('\n')
+    const specBody = [...preSpec, ...postSpec].join('\n')
     const description = specBody
       ? `${qty} Units ${itemCode} — ${specBody}`
       : `${qty} Units ${itemCode}`
     lineItems.push({ description, quantity: qty, unitPrice, amount })
+  }
+
+  // Format B — UFP/Northann output PDFs: "{itemCode} {price}/Unit {qty} {total}"
+  if (!foundIGF) {
+    const ufpPattern = /^([A-Z][A-Z0-9]+)\s+([\d,]+\.?\d*)\/[Uu]nit\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/gm
+    ufpPattern.lastIndex = 0
+    while ((match = ufpPattern.exec(text)) !== null) {
+      const itemCode = match[1]
+      const unitPrice = parseFloat(match[2].replace(',', ''))
+      const qty = parseFloat(match[3].replace(',', ''))
+      const amount = parseFloat(match[4].replace(',', ''))
+      const afterMatch = text.substring(match.index + match[0].length)
+      const specLines: string[] = []
+      for (const ln of afterMatch.split('\n')) {
+        const t = ln.trim()
+        if (!t) continue
+        if (t.match(/^[A-Z][A-Z0-9]+\s+[\d,]+\.?\d*\/[Uu]nit/) || t.match(/^(TOTAL|APPROVED|AUTHORIZED|Page|MAXIMUM)/i)) break
+        specLines.push(t)
+      }
+      const specBody = specLines.join('\n')
+      const description = specBody
+        ? `${qty} Units ${itemCode} — ${specBody}`
+        : `${qty} Units ${itemCode}`
+      lineItems.push({ description, quantity: qty, unitPrice, amount })
+    }
   }
 
   if (lineItems.length === 0 && totalAmount > 0) {
