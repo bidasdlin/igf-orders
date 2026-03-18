@@ -7,7 +7,23 @@ import { IGFPOProcessor } from '@/components/igf-po-processor'
 export default function Home() {
   function openUpload() {
     document.getElementById('upload')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    window.dispatchEvent(new Event('igf-open-upload'))
+
+    const input = document.getElementById('igf-upload-input') as (HTMLInputElement & { showPicker?: () => void }) | null
+    if (!input) {
+      window.dispatchEvent(new Event('igf-open-upload'))
+      return
+    }
+
+    if (typeof input.showPicker === 'function') {
+      try {
+        input.showPicker()
+        return
+      } catch {
+        // Fall through to click when showPicker is blocked.
+      }
+    }
+
+    input.click()
   }
 
   return (

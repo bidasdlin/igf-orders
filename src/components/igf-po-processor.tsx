@@ -322,6 +322,7 @@ export function IGFPOProcessor() {
           ].join(' ')}
         >
           <input
+            id="igf-upload-input"
             ref={fileInputRef}
             type="file"
             accept=".pdf"
