@@ -4,9 +4,6 @@ import pdfParse from 'pdf-parse'
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
-// IGF PDFs store ASCII characters as 2-byte big-endian Unicode (wide chars).
-// e.g., 'N' (0x4E) -> U+4E00, 'Total' -> garbled CJK, '$' -> U+2400
-// Decode by extracting the high byte when the low byte is 0x00.
 function decodeWideChars(text: string): string {
   return text.replace(/[\u2000-\uFFFF]/g, (char) => {
     const code = char.charCodeAt(0)
@@ -21,16 +18,15 @@ function decodeWideChars(text: string): string {
   })
 }
 
-// NDC PDFs have duplicated text (e.g. "04/22/2604/22/26"), deduplicate repeated values
 function dedup(val: string): string {
   const half = Math.floor(val.length / 2)
-  if (val.length % 2 === 0 && val.slice(0, half) === val.slice(half)) return val.slice(0, half)
+  if (val.length % 2 === 0 && val.slice(0, half) === val.slice(half))
+    return val.slice(0, half)
   return val
 }
 
 function parseDate(d: string): string {
   try {
-    // IGF PDFs: slashes come out as 'N' (e.g. "03N12N26"). Normalize to '/'.
     const normalized = d.replace(/N/g, '/')
     const parts = normalized.split('/')
     if (parts.length === 3) {
@@ -42,12 +38,10 @@ function parseDate(d: string): string {
 }
 
 function extractPOData(text: string, fileName: string) {
-  // Decode IGF's wide-char encoding first so all patterns work correctly
   text = decodeWideChars(text)
-
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
 
-  // ── PO Number ──────────────────────────────────────────
+  // PO Number extraction
   let poNumber = ''
   const poIdx = lines.findIndex(l => l.match(/PURCHASE\s*ORDER/i))
   if (poIdx >= 0 && lines[poIdx + 1]) {
@@ -58,11 +52,10 @@ function extractPOData(text: string, fileName: string) {
     if (m) poNumber = m[1]
   }
   if (!poNumber) {
-    // Use filename
     poNumber = fileName.replace('Purchase Order', '').replace('.pdf', '').trim()
   }
 
-  // ── Vendor (mfg line) ──────────────────────────────────
+  // Vendor extraction
   let vendorName = ''
   const mfgLine = lines.find(l => l.toLowerCase().startsWith('mfg '))
   if (mfgLine) vendorName = mfgLine.replace(/^mfg\s+/i, '').trim()
@@ -71,7 +64,7 @@ function extractPOData(text: string, fileName: string) {
     if (mfgMatch) vendorName = mfgMatch[1].trim()
   }
 
-  // ── Ship To ────────────────────────────────────────────
+  // Ship To extraction
   let shipTo = ''
   const portMatch = text.match(/Port of ([^\n]+)/i)
   if (portMatch) {
@@ -85,9 +78,8 @@ function extractPOData(text: string, fileName: string) {
     }
   }
 
-  // ── Order Date ─────────────────────────────────────────
+  // Order Date extraction
   let orderDate = ''
-  // IGF PDFs: slashes appear as 'N', values are duplicated: "03N12N2603N12N26"
   const rawDate = text.match(/Order Date:\s*\n*(\d{2}[\/N]\d{2}[\/N]\d{2,4})/i)
   if (rawDate) {
     orderDate = parseDate(rawDate[1])
@@ -97,52 +89,41 @@ function extractPOData(text: string, fileName: string) {
     else orderDate = new Date().toISOString().split('T')[0]
   }
 
-  // ── Total Amount ───────────────────────────────────────
+  // Total Amount extraction
   let totalAmount = 0
-  // Pattern: "Total $16,956.67$16,956.67" (duplicated in IGF PDFs)
   const totalMatch = text.match(/Total\s+\$?([\d,]+\.?\d*)\$?([\d,]+\.?\d*)/i)
   if (totalMatch) {
     const raw = totalMatch[1].replace(/,/g, '')
     totalAmount = parseFloat(raw) || 0
   }
 
-  // ── Line Items ─────────────────────────────────────────
+  // Line Items extraction
   const lineItems: Array<{ description: string; quantity: number; unitPrice: number; amount: number }> = []
   let match
 
-  // IGF format after decode: "1414UNIT  AWB2520TE1,081.42N...16,956.67UNIT14.00N"
-  // QTY appears doubled because QUANTITY and TOTAL QUANTITY columns are merged.
-  // Item code is followed immediately by a comma-separated price (e.g. "1,081.42").
-  // Use [^\s,]+ to stop at the comma, then trim trailing digits from merged data.
   const igfPattern = /^(\d+)\s*UNIT\s+([^\s,]+)/gm
   igfPattern.lastIndex = 0
   let foundIGF = false
 
   while ((match = igfPattern.exec(text)) !== null) {
-    // Handle doubled quantity (QUANTITY + TOTAL QUANTITY merged, e.g. "1414" -> 14)
     let qty: number
     const rawQty = match[1]
     const mid = Math.floor(rawQty.length / 2)
+
     if (rawQty.length >= 2 && rawQty.length % 2 === 0 && rawQty.slice(0, mid) === rawQty.slice(mid)) {
       qty = parseInt(rawQty.slice(0, mid))
     } else {
       qty = parseInt(rawQty)
     }
 
-    // Clean up item code: strip trailing digits merged from price column, then keep alphanumeric
     const rawCode = match[2].replace(/\d+$/, '')
     const itemCode = rawCode.replace(/[^A-Z0-9]/gi, '') || rawCode
 
-    // Get the full line text to extract price
     const lineEnd = text.indexOf('\n', match.index)
     const lineText = text.substring(match.index, lineEnd > 0 ? lineEnd : text.length)
 
-    // Amount: for IGF POs the document-level total IS the line item total.
-    // The per-item total in the merged column data is unreliable due to column merging.
     const amount = totalAmount
 
-    // Unit price: look for "14.00N" or "14.00/" pattern in the line
-    // Take the last match (the per-unit price, not the per-MSF price)
     const priceMatches = lineText.match(/(\d+\.\d{2})[N\/]/g)
     const lastPrice = priceMatches ? priceMatches[priceMatches.length - 1] : null
     const priceMatch = lastPrice ? lastPrice.match(/(\d+\.\d{2})/) : null
@@ -150,23 +131,35 @@ function extractPOData(text: string, fileName: string) {
       ? parseFloat(priceMatch[1])
       : (qty > 0 ? parseFloat((amount / qty).toFixed(2)) : 0)
 
-    // Spec lines BEFORE the item (from ITEM/DESCRIPTION header onwards)
+    // ── Pre-item spec: everything between the column-header row and this item ──
     const textBefore = text.substring(0, match.index)
-    const headerIdx = Math.max(
-      textBefore.lastIndexOf('ITEMNDESCRIPTION'),
-      textBefore.lastIndexOf('ITEM/DESCRIPTION'),
-      textBefore.lastIndexOf('ITEMDESCRIPTION'),
-    )
+    const tbLines = textBefore.split('\n')
     const preSpec: string[] = []
-    if (headerIdx >= 0) {
-      for (const ln of textBefore.substring(headerIdx + 16).split('\n')) {
-        const t = ln.trim()
-        if (!t || t.match(/^(QUANTITY|UOM|PRICE|AMOUNT|TOTAL|ITEM)/i)) continue
+
+    // Walk backwards to find the last line that looks like a table column header
+    let colHeaderIdx = -1
+    for (let i = tbLines.length - 1; i >= 0; i--) {
+      const u = tbLines[i].toUpperCase()
+      if (
+        (u.includes('QUANTITY') || u.includes('QUANT')) &&
+        (u.includes('DESCRIPTION') || u.includes('PRICE') || u.includes('AMOUNT') || u.includes('UOM'))
+      ) {
+        colHeaderIdx = i
+        break
+      }
+    }
+
+    if (colHeaderIdx >= 0) {
+      for (let i = colHeaderIdx + 1; i < tbLines.length; i++) {
+        const t = tbLines[i].trim()
+        if (!t) continue
+        // Skip lines that are purely column-header repeats or table meta
+        if (t.match(/^(QUANTITY|TOTAL\s+QUANTITY|UOM|PRICE\/UOM|AMOUNT|ITEM\/DESCRIPTION)/i)) continue
         preSpec.push(t)
       }
     }
 
-    // Spec lines AFTER the item (until Subtotal / MAXIMUM / next item)
+    // ── Post-item spec: lines after the item match until a stop sentinel ──
     const afterMatch = text.substring(match.index + match[0].length)
     const postSpec: string[] = []
     for (const ln of afterMatch.split('\n')) {
@@ -174,21 +167,20 @@ function extractPOData(text: string, fileName: string) {
       if (!t) continue
       if (t.match(/^(Subtotal|MAXIMUM|TOTAL|APPROVED|AUTHORIZED|Page)/i)) break
       if (t.match(/^\d+\s*UNIT\s+[A-Z]/)) break
-      // Skip lines that are only numbers/prices
       if (t.match(/^[\d,\.\s\$]+$/)) continue
       postSpec.push(t)
     }
 
     const specBody = [...preSpec, ...postSpec].join('\n')
     const description = specBody
-      ? `${qty} Units ${itemCode} — ${specBody}`
+      ? `${qty} Units ${itemCode}\n${specBody}`
       : `${qty} Units ${itemCode}`
 
     lineItems.push({ description, quantity: qty, unitPrice, amount })
     foundIGF = true
   }
 
-  // UFP/Northann output format fallback: "{itemCode} {price}/Unit {qty} {total}"
+  // UFP/Northann fallback format
   if (!foundIGF) {
     const ufpPattern = /^([A-Z][A-Z0-9]+)\s+([\d,]+\.?\d*)\/[Uu]nit\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/gm
     ufpPattern.lastIndex = 0
@@ -197,23 +189,49 @@ function extractPOData(text: string, fileName: string) {
       const unitPrice = parseFloat(match[2].replace(/,/g, ''))
       const qty = parseFloat(match[3].replace(/,/g, ''))
       const amount = parseFloat(match[4].replace(/,/g, ''))
+
+      // Pre-spec: look for column header before this item too
+      const textBefore = text.substring(0, match.index)
+      const tbLines = textBefore.split('\n')
+      const preSpec: string[] = []
+      let colHeaderIdx = -1
+      for (let i = tbLines.length - 1; i >= 0; i--) {
+        const u = tbLines[i].toUpperCase()
+        if (
+          (u.includes('QUANTITY') || u.includes('QTY')) &&
+          (u.includes('RATE') || u.includes('AMOUNT') || u.includes('LOADING'))
+        ) {
+          colHeaderIdx = i
+          break
+        }
+      }
+      if (colHeaderIdx >= 0) {
+        for (let i = colHeaderIdx + 1; i < tbLines.length; i++) {
+          const t = tbLines[i].trim()
+          if (!t) continue
+          if (t.match(/^(QTY|RATE|AMOUNT|LOADING)/i)) continue
+          preSpec.push(t)
+        }
+      }
+
       const afterMatch = text.substring(match.index + match[0].length)
-      const specLines: string[] = []
+      const postSpec: string[] = []
       for (const ln of afterMatch.split('\n')) {
         const t = ln.trim()
         if (!t) continue
-        if (t.match(/^[A-Z][A-Z0-9]+\s+[\d,]+\.?\d*\/[Uu]nit/) || t.match(/^(TOTAL|APPROVED|AUTHORIZED|Page|MAXIMUM)/i)) break
-        specLines.push(t)
+        if (t.match(/^[A-Z][A-Z0-9]+\s+[\d,]+\.?\d*\/[Uu]nit/) || t.match(/^(TOTAL|APPROVED|AUTHORIZED|Page|MAXIMUM|Subtotal)/i)) break
+        postSpec.push(t)
       }
-      const specBody = specLines.join('\n')
+
+      const specBody = [...preSpec, ...postSpec].join('\n')
       const description = specBody
-        ? `${qty} Units ${itemCode} — ${specBody}`
+        ? `${qty} Units ${itemCode}\n${specBody}`
         : `${qty} Units ${itemCode}`
       lineItems.push({ description, quantity: qty, unitPrice, amount })
     }
   }
 
-  // Fallback: if no line items parsed, create one from total
+  // Fallback if no items found
   if (lineItems.length === 0 && totalAmount > 0) {
     lineItems.push({
       description: 'Refer to attached PO for line item details',
@@ -223,7 +241,7 @@ function extractPOData(text: string, fileName: string) {
     })
   }
 
-  // ── Notes ──────────────────────────────────────────────
+  // Notes extraction
   let notes = ''
   const maxWeightMatch = text.match(/(MAXIMUM WEIGHT[^\n]+)/i)
   if (maxWeightMatch) notes = maxWeightMatch[1].trim()
