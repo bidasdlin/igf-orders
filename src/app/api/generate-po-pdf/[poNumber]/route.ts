@@ -131,7 +131,9 @@ export async function GET(
   const lx = width - M - 120
   const ly = height - 78
   try {
-    const logoRes = await fetch('https://dl.dropboxusercontent.com/scl/fi/96dazjf2coj8wd2yk97x1/logo-northann.jpg?rlkey=h2yzlac1rbxuzc38fomax8wk2')
+    const ctrl = new AbortController()
+  setTimeout(() => ctrl.abort(), 5000)
+  const logoRes = await fetch('https://dl.dropboxusercontent.com/scl/fi/96dazjf2coj8wd2yk97x1/logo-northann.jpg?rlkey=h2yzlac1rbxuzc38fomax8wk2', { signal: ctrl.signal })
     if (logoRes.ok) {
       const logoBytes = await logoRes.arrayBuffer()
       const logoImage = await pdfDoc.embedJpg(logoBytes)
