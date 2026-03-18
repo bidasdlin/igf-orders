@@ -103,6 +103,23 @@ export function IGFPOProcessor() {
   const parsingFilesRef = useRef<string[]>([])
   const batchSyncRef = useRef(false)
 
+  const openFilePicker = useCallback(() => {
+    const input = fileInputRef.current
+    if (!input) return
+
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void }
+    if (typeof pickerInput.showPicker === 'function') {
+      try {
+        pickerInput.showPicker()
+        return
+      } catch {
+        // Fall back to click when showPicker is unsupported or blocked.
+      }
+    }
+
+    input.click()
+  }, [])
+
   useEffect(() => {
     ordersRef.current = orders
   }, [orders])
@@ -117,14 +134,14 @@ export function IGFPOProcessor() {
 
   useEffect(() => {
     const openUpload = () => {
-      fileInputRef.current?.click()
+      openFilePicker()
     }
 
     window.addEventListener('igf-open-upload', openUpload)
     return () => {
       window.removeEventListener('igf-open-upload', openUpload)
     }
-  }, [])
+  }, [openFilePicker])
 
   const parseFile = useCallback(async (file: File) => {
     const tempId = `${file.name}-${Date.now()}`
@@ -294,7 +311,7 @@ export function IGFPOProcessor() {
             if (!event.currentTarget.contains(event.relatedTarget as Node)) setIsDragging(false)
           }}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
+          onClick={openFilePicker}
           className={[
             'panel subtle-grid min-h-[320px] cursor-pointer border-2 border-dashed px-6 py-8 transition duration-200 md:px-8 md:py-10',
             isDragging
@@ -309,7 +326,7 @@ export function IGFPOProcessor() {
             type="file"
             accept=".pdf"
             multiple
-            className="hidden"
+            className="sr-only"
             onChange={handleFiles}
           />
 
@@ -350,7 +367,7 @@ export function IGFPOProcessor() {
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation()
-                          fileInputRef.current?.click()
+                          openFilePicker()
                         }}
                         className="btn-primary w-full justify-center sm:w-auto"
                       >

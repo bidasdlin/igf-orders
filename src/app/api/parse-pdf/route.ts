@@ -127,7 +127,8 @@ function normalizeDateCandidate(value: string): string | null {
     .replace(/\s+/g, '')
     .replace(/N/g, '/')
 
-  const match = normalized.match(/(\d{2}\/\d{2}\/\d{2,4})/)
+  const deduped = normalized.replace(/(\d{2}\/\d{2}\/\d{2,4})\1/g, '$1')
+  const match = deduped.match(/(\d{2}\/\d{2}\/\d{2,4})/)
   if (!match) return null
 
   return toIsoDate(match[1])
