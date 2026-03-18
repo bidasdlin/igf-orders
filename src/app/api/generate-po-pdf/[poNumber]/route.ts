@@ -2,6 +2,7 @@ import { PDFDocument, rgb, StandardFonts, PDFFont } from 'pdf-lib'
 import { getPurchaseOrderByDocNumber } from '@/lib/quickbooks'
 
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  text = sanitize(text)
   const lines: string[] = []
   for (const paragraph of text.split('\n')) {
     const words = paragraph.split(' ')
