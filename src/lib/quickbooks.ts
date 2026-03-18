@@ -60,7 +60,8 @@ async function qbRequest(method: string, endpoint: string, body?: object) {
 
 export interface IGFPOLineItem {
   description: string
-  qty: number
+  quantity?: number
+  qty?: number
   unitPrice: number
   amount: number
 }
@@ -74,6 +75,8 @@ export interface IGFPurchaseOrder {
   lineItems: IGFPOLineItem[]
   totalAmount: number
   notes?: string
+  branch?: string
+  freightTerm?: string
 }
 
 export interface QBVendor {
@@ -171,6 +174,25 @@ function normalizeTxnDate(date: string): string {
   return new Date().toISOString().split('T')[0]
 }
 
+function buildMemo(po: IGFPurchaseOrder): string {
+  return [
+    `Customer PO#: ${po.customerPONumber}`,
+    po.branch ? `NDC Branch: ${po.branch}` : null,
+    po.freightTerm ? `Frt Term: ${po.freightTerm}` : null,
+    `Ship to: ${po.shipTo}`,
+  ].filter(Boolean).join(' | ')
+}
+
+function buildPrivateNote(po: IGFPurchaseOrder): string {
+  return [
+    `IGF Customer PO: ${po.customerPONumber}`,
+    po.branch ? `NDC Branch: ${po.branch}` : null,
+    po.freightTerm ? `Frt Term: ${po.freightTerm}` : null,
+    `Ship to: ${po.shipTo}`,
+    po.notes ?? '',
+  ].filter(Boolean).join(' | ')
+}
+
 export async function createPurchaseOrder(po: IGFPurchaseOrder): Promise<QBPurchaseOrder> {
   const [vendor, cogsAccount] = await Promise.all([getOrCreateVendor(po.vendorName), getCogsAccount()])
   const body = {
@@ -179,12 +201,8 @@ export async function createPurchaseOrder(po: IGFPurchaseOrder): Promise<QBPurch
     VendorRef: { value: vendor.Id, name: vendor.DisplayName },
     POStatus: 'Open',
     Line: buildLines(po, cogsAccount),
-    Memo: `Customer PO#: ${po.customerPONumber} | Ship to: ${po.shipTo}`,
-    PrivateNote: [
-      `IGF Customer PO: ${po.customerPONumber}`,
-      `Ship to: ${po.shipTo}`,
-      po.notes ?? '',
-    ].filter(Boolean).join(' | '),
+    Memo: buildMemo(po),
+    PrivateNote: buildPrivateNote(po),
   }
   const data = await qbRequest('POST', 'purchaseorder', body)
   return data.PurchaseOrder
@@ -199,16 +217,12 @@ export async function updatePurchaseOrder(
     Id: existing.Id,
     SyncToken: existing.SyncToken,
     DocNumber: existing.DocNumber,
-    TxnDate: existing.TxnDate,
+    TxnDate: normalizeTxnDate(po.date),
     VendorRef: existing.VendorRef,
     POStatus: existing.POStatus,
     Line: buildLines(po, cogsAccount),
-    Memo: `Customer PO#: ${po.customerPONumber} | Ship to: ${po.shipTo}`,
-    PrivateNote: [
-      `IGF Customer PO: ${po.customerPONumber}`,
-      `Ship to: ${po.shipTo}`,
-      po.notes ?? '',
-    ].filter(Boolean).join(' | '),
+    Memo: buildMemo(po),
+    PrivateNote: buildPrivateNote(po),
   }
   const data = await qbRequest('POST', 'purchaseorder', body)
   return data.PurchaseOrder

@@ -1,3 +1,172 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --bg: #f4ede3;
+  --bg-strong: #fffaf2;
+  --ink: #16212a;
+  --muted: #5d6870;
+  --panel: rgba(255, 250, 242, 0.8);
+  --panel-strong: rgba(255, 255, 255, 0.92);
+  --panel-dark: #152028;
+  --border: rgba(22, 33, 42, 0.12);
+  --accent: #0f766e;
+  --accent-soft: rgba(15, 118, 110, 0.12);
+  --warm: #c67b2d;
+  --warm-soft: rgba(198, 123, 45, 0.14);
+  --danger: #c2410c;
+  --danger-soft: rgba(194, 65, 12, 0.12);
+  --shadow: 0 24px 80px rgba(22, 33, 42, 0.1);
+}
+
+@layer base {
+  html {
+    background: var(--bg);
+  }
+
+  body {
+    position: relative;
+    min-height: 100vh;
+    color: var(--ink);
+    font-family: var(--font-sans), sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(198, 123, 45, 0.18), transparent 30%),
+      radial-gradient(circle at top right, rgba(15, 118, 110, 0.14), transparent 28%),
+      linear-gradient(180deg, #fbf6ee 0%, #f2eadf 52%, #efe7db 100%);
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.4;
+    background-image:
+      linear-gradient(rgba(22, 33, 42, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(22, 33, 42, 0.04) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(circle at center, black 40%, transparent 85%);
+  }
+
+  a {
+    color: inherit;
+  }
+}
+
+@layer components {
+  .site-shell {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .panel {
+    @apply rounded-[28px] border;
+    background: var(--panel);
+    border-color: var(--border);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px);
+  }
+
+  .panel-dark {
+    @apply rounded-[28px] border text-white;
+    background:
+      radial-gradient(circle at top right, rgba(198, 123, 45, 0.22), transparent 34%),
+      linear-gradient(155deg, #17232c 0%, #0f181f 100%);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 28px 90px rgba(15, 24, 31, 0.28);
+  }
+
+  .subtle-grid {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .subtle-grid::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 18% 18%, rgba(198, 123, 45, 0.16), transparent 24%),
+      linear-gradient(135deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  }
+
+  .subtle-grid > * {
+    position: relative;
+  }
+
+  .eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em];
+    color: var(--muted);
+    background: rgba(22, 33, 42, 0.06);
+  }
+
+  .display-title {
+    font-family: var(--font-display), sans-serif;
+    @apply text-4xl font-semibold leading-[0.94] tracking-[-0.04em] md:text-5xl xl:text-6xl;
+  }
+
+  .section-title {
+    font-family: var(--font-display), sans-serif;
+    @apply text-2xl font-semibold tracking-[-0.03em] md:text-3xl;
+  }
+
+  .font-display {
+    font-family: var(--font-display), sans-serif;
+  }
+
+  .font-data {
+    font-family: var(--font-mono), monospace;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-white transition;
+    background: var(--ink);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    background: #0e171f;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border px-5 py-3 text-sm font-semibold transition;
+    border-color: var(--border);
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--ink);
+  }
+
+  .btn-secondary:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.92);
+  }
+
+  .enter-fade {
+    animation: enter-fade 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .stagger-1 {
+    animation-delay: 0.08s;
+  }
+
+  .stagger-2 {
+    animation-delay: 0.14s;
+  }
+
+  .stagger-3 {
+    animation-delay: 0.2s;
+  }
+}
+
+@keyframes enter-fade {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

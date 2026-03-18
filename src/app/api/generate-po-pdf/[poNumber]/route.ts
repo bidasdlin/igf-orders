@@ -45,10 +45,12 @@ function getVendorCode(vendorName: string): string {
 }
 
 function parseMemo(memo: string) {
-  // Format 1: "NDC Branch: LA | DDP-LA"
-  const m1 = memo.match(/NDC Branch:\s*(\S+)\s*\|\s*(\S+)/)
-  if (m1) return { branch: m1[1], freightTerm: m1[2] }
-  // Format 2: "Customer PO#: XXXX | Ship to: Port of Los Angeles, CA"
+  const branch = memo.match(/NDC Branch:\s*([A-Z]+)/i)?.[1] ?? ''
+  const freightTerm = memo.match(/(?:Frt Term|Freight Term):\s*([A-Z]+-[A-Z]+)/i)?.[1]
+    ?? memo.match(/\b(DDP|FOB|CIF|CFR|FCA|CPT|CIP|DAP|DPU|EXW)-[A-Z]+\b/i)?.[0]
+    ?? ''
+  if (branch || freightTerm) return { branch, freightTerm }
+
   const shipToM = memo.match(/[Ss]hip to:\s*([^|]+)/i)
   if (shipToM) {
     const shipToFull = shipToM[1].trim()
@@ -57,12 +59,11 @@ function parseMemo(memo: string) {
       'New York': 'NY', 'Newark': 'NE', 'Portland': 'VANC',
       'Seattle': 'SEA', 'Norfolk': 'NOR',
     }
-    let branch = ''
+    let derivedBranch = ''
     for (const key of Object.keys(branchMap)) {
-      if (shipToFull.includes(key)) { branch = branchMap[key]; break }
+      if (shipToFull.includes(key)) { derivedBranch = branchMap[key]; break }
     }
-    const freightM = memo.match(/\b(DDP|FOB|CIF|CFR|FCA|CPT|CIP|DAP|DPU|EXW)-[A-Z]+\b/)
-    return { branch, freightTerm: freightM ? freightM[0] : '' }
+    return { branch: derivedBranch, freightTerm }
   }
   return { branch: '', freightTerm: '' }
 }
@@ -123,7 +124,8 @@ export async function GET(
     LA: 'Port of Los Angeles, CA', SAV: 'Port of Savannah, GA',
     HOU: 'Port of Houston, TX', NY: 'Port of New York, NJ',
     XA: 'Port of Savannah, GA', TEXAS: 'Port of Houston, TX',
-    NE: 'Port of New York, NJ', VANC: 'Port of Portland, OR',
+    NE: 'Port of Newark, NJ', VANC: 'Port of Portland, OR',
+    NOR: 'Port of Norfolk, VA', SEA: 'Port of Seattle, WA',
   }
   const shipTo = portMap[branch] ?? branch
 
