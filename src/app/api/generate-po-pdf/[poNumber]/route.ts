@@ -258,6 +258,8 @@ export async function GET(
   page.drawLine({ start: { x: M + 72, y: y - 2 }, end: { x: width - M, y: y - 2 }, thickness: 0.5, color: black })
 
   page.drawText('Page 1 of 1', { x: width / 2 - 26, y: 22, font: fontR, size: 8, color: medGray })
+  const genTime = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles', month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+  page.drawText('Generated: ' + genTime + ' PST', { x: width - M - 160, y: 22, font: fontR, size: 7, color: medGray })
 
   const pdfBytes = await pdfDoc.save()
   return new Response(pdfBytes.buffer as ArrayBuffer, {
