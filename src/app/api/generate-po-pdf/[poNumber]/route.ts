@@ -2,19 +2,21 @@ import { PDFDocument, rgb, StandardFonts, PDFFont } from 'pdf-lib'
 import { getPurchaseOrderByDocNumber } from '@/lib/quickbooks'
 
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
-  const words = text.split(' ')
   const lines: string[] = []
-  let current = ''
-  for (const w of words) {
-    const test = current ? `${current} ${w}` : w
-    if (font.widthOfTextAtSize(test, size) > maxWidth && current) {
-      lines.push(current)
-      current = w
-    } else {
-      current = test
+  for (const paragraph of text.split('\n')) {
+    const words = paragraph.split(' ')
+    let current = ''
+    for (const w of words) {
+      const test = current ? `${current} ${w}` : w
+      if (font.widthOfTextAtSize(test, size) > maxWidth && current) {
+        lines.push(current)
+        current = w
+      } else {
+        current = test
+      }
     }
+    if (current) lines.push(current)
   }
-  if (current) lines.push(current)
   return lines
 }
 
