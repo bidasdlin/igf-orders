@@ -89,8 +89,19 @@ function extractPOData(text: string, fileName: string) {
     const amount = parseFloat(match[5].replace(',', ''))
     const unitPrice = qty > 0 ? parseFloat((amount / qty).toFixed(2)) : 0
     const afterMatch = text.substring(match.index + match[0].length)
-    const descMatch = afterMatch.match(/\n([^\n]{10,}(?:pcs|OVR|Compliant|Certified|CARB)[^\n]*)/i)
-    const description = descMatch ? descMatch[1].trim() : `${match[2]} — Qty: ${qty}`
+    // Capture ALL spec lines until next item / TOTAL / end of section
+    const specLines: string[] = []
+    for (const ln of afterMatch.split('\n')) {
+      const t = ln.trim()
+      if (!t) continue
+      if (t.match(/^\d+\s+UNIT/i) || t.match(/^(TOTAL|APPROVED|AUTHORIZED|Page)/i)) break
+      specLines.push(t)
+    }
+    const itemCode = match[2]
+    const specBody = specLines.join('\n')
+    const description = specBody
+      ? `${qty} Units ${itemCode} — ${specBody}`
+      : `${qty} Units ${itemCode} — Qty: ${qty}`
     lineItems.push({ description, quantity: qty, unitPrice, amount })
   }
 
