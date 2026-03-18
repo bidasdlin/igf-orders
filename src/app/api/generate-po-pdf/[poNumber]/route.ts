@@ -27,13 +27,22 @@ function sanitize(s: string): string {
   return s.replace(/[^\x0A\x0D\x20-\x7E\u00A0-\u00FF\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u20AC]/g, '?')}
 
 function parseQBDescription(desc: string): { qty: number; itemCode: string; description: string } {
-  const dashIdx = desc.indexOf(' — ')
-  const header = dashIdx >= 0 ? desc.substring(0, dashIdx) : desc
-  const description = dashIdx >= 0 ? desc.substring(dashIdx + 3) : ''
-  const parts = header.trim().split(' ')
-  const qty = parseInt(parts[0]) || 0
-  const itemCode = parts[2] ?? ''
-  return { qty, itemCode, description }
+  const normalized = sanitize(desc).trim()
+  const match = normalized.match(/^(\d+(?:\.\d+)?)\s+Units?\s+([A-Z0-9]+)\s*(?:—|-)?\s*([\s\S]*)$/)
+  if (match) {
+    return {
+      qty: parseInt(match[1], 10) || 0,
+      itemCode: match[2] ?? '',
+      description: match[3]?.trim() ?? '',
+    }
+  }
+
+  const parts = normalized.split(/\s+/)
+  return {
+    qty: parseInt(parts[0] ?? '0', 10) || 0,
+    itemCode: parts[2] ?? '',
+    description: '',
+  }
 }
 
 function getVendorCode(vendorName: string): string {
@@ -104,7 +113,7 @@ export async function GET(
   const txnDate = (qbPO.TxnDate as string) ?? ''
   const orderDate = formatDate(txnDate)
   const docNumber = (qbPO.DocNumber as string) ?? params.poNumber
-  const memo = (qbPO.Memo as string) ?? ''
+  const memo = (qbPO.Memo as string) ?? (qbPO.PrivateNote as string) ?? ''
   const totalAmt = (qbPO.TotalAmt as number) ?? 0
   const { branch, freightTerm } = parseMemo(memo)
 

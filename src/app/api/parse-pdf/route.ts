@@ -32,7 +32,7 @@ function decodeWideChars(text: string): string {
       }
     }
     return char
-  })
+  }).replace(/\(ᄀ\)/g, '2')
 }
 
 function toIsoDate(value: string): string {
@@ -47,6 +47,7 @@ function cleanLine(line: string): string {
     .replace(/\u0000/g, '')
     .replace(/\f/g, '')
     .replace(/\u1100/g, '2')
+    .replace(/\(ᄀ\)/g, '2')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -57,6 +58,7 @@ function normalizePdfText(text: string): string {
     .replace(/\u0000/g, '')
     .replace(/\f/g, '\n')
     .replace(/\u1100/g, '2')
+    .replace(/\(ᄀ\)/g, '2')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
@@ -118,6 +120,19 @@ function findDateAroundLabel(lines: string[], label: string): string {
   return new Date().toISOString().split('T')[0]
 }
 
+function normalizeDateCandidate(value: string): string | null {
+  const normalized = value
+    .replace(/\(ᄀ\)/g, '2')
+    .replace(/\u1100/g, '2')
+    .replace(/\s+/g, '')
+    .replace(/N/g, '/')
+
+  const match = normalized.match(/(\d{2}\/\d{2}\/\d{2,4})/)
+  if (!match) return null
+
+  return toIsoDate(match[1])
+}
+
 function extractVendor(lines: string[], text: string): string {
   const mfgLine = lines.find((line) => /^mfg\s+/i.test(line))
   if (mfgLine) return mfgLine.replace(/^mfg\s+/i, '').trim()
@@ -133,11 +148,19 @@ function extractVendor(lines: string[], text: string): string {
 }
 
 function extractOrderDate(lines: string[]): string {
-  const line = lines.find((entry) => entry.toLowerCase().includes('order date:'))
-  if (line) {
-    const match = line.match(/Order Date:\s*(\d\s*\d\/\d\s*\d\/\d{2,4})/i)
-    if (match) return toIsoDate(match[1].replace(/\s+/g, ''))
+  const orderLine = lines.find((entry) => entry.toLowerCase().includes('order date:') && /\d/.test(entry))
+  if (orderLine) {
+    const parsed = normalizeDateCandidate(orderLine)
+    if (parsed) return parsed
   }
+
+  const buyerLine = lines.find((entry) => /Buyer:/i.test(entry) && !/Buyer 2:/i.test(entry))
+  if (buyerLine) {
+    const match = buyerLine.match(/([0-9N/\s]{6,32})Buyer:/i)
+    const parsed = normalizeDateCandidate(match?.[1] ?? buyerLine)
+    if (parsed) return parsed
+  }
+
   return findDateAroundLabel(lines, 'Order Date:')
 }
 
@@ -155,11 +178,42 @@ function extractShipTo(lines: string[], text: string): string {
 }
 
 function extractFreightTerm(text: string): string | undefined {
-  return text.match(/Frt Term:\s*([A-Z]+-[A-Z]+)/i)?.[1]
+  return text.match(/Frt Term:\s*(?:HIGH CUBE CY\s*)?([A-Z]+-[A-Z]+)/i)?.[1]
 }
 
-function extractBranch(text: string): string | undefined {
-  return text.match(/B\s*ranch:\s*([A-Z]+)/i)?.[1]
+function mapFreightTermToBranch(freightTerm?: string): string | undefined {
+  switch (freightTerm) {
+    case 'DDP-LA':
+      return 'LA'
+    case 'DDP-SAV':
+      return 'XA'
+    case 'DDP-HOU':
+      return 'TEXAS'
+    case 'DDP-NY':
+      return 'NE'
+    case 'DDP-PDX':
+      return 'VANC'
+    default:
+      return undefined
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function extractBranch(text: string, poNumber: string, freightTerm?: string): string | undefined {
+  const direct = text.match(/^\s*B\s*ranch:\s*([A-Z]{2,10})\s*$/im)?.[1]
+  if (direct && direct.toUpperCase() !== 'BRANCH') return direct
+
+  const blockPattern = new RegExp(
+    `PURCHASE\\s*ORDER\\s*\\n+\\s*${escapeRegExp(poNumber)}\\s*\\n+\\s*[A-Z]{2,10}\\s*\\n+\\s*([A-Z]{2,10})\\s*\\n`,
+    'i',
+  )
+  const blockMatch = text.match(blockPattern)?.[1]
+  if (blockMatch) return blockMatch
+
+  return mapFreightTermToBranch(freightTerm)
 }
 
 function parseMoney(value: string): number {
@@ -173,7 +227,7 @@ function extractMoneyValues(text: string): number[] {
 }
 
 function isSectionBoundary(line: string): boolean {
-  return /^(?:QUANTITY|UOM|TOTAL QUANTITY|ITEM\/DESCRIPTION|PRICE\/UOM|AMOUNT|Reference:|Verbal PO:|Ship Via:|Order Date:|Exp Ship Date:|Type:|WH|Frt Term:|HIGH CUBE CY|Page \d+ of \d+|Reprinted:|Supplier:|Ship To:|Account:|Branch:|Phone:|Fax:|Buyer:|Buyer 2:|W H Confirmed:)/i.test(line)
+  return /^(?:QUANTITY|QUA\/TITY|UOM|TOTAL(?: QUANTITY)?|ITEM.?DESCRIPTION|PRICE.?UOM|AMOU.?T|Reference:|Verbal PO:|Ship Via:|Order Date:|Exp Ship Date:|Type:|WH(?:WHType:)?|Frt Term:|HIGH CUBE CY|Page \d+ of \d+|Reprinted:|Supplier:|Ship To:|Account:|Branch:|Phone:|Fax:|Buyer:|Buyer 2:|Confirmed:|W H Confirmed:|Payment Terms:|Due at Receipt of Documentation|Printed:)/i.test(line)
 }
 
 function isValueNoise(line: string): boolean {
@@ -206,19 +260,75 @@ function buildParsedItem(quantity: number, itemCode: string, totalAmount: number
   }
 }
 
+function normalizeDescriptionLine(line: string): string {
+  return cleanLine(
+    line
+      .replace(/D\+NE/g, 'D+/E')
+      .replace(/\bDNE\b/g, 'D/E')
+      .replace(/\+N-/g, '+/-')
+      .replace(/([A-Za-z0-9])N(?=[A-Za-z0-9])/g, '$1/')
+      .replace(/\/{2,}/g, '/'),
+  )
+}
+
+function isDescriptionStop(line: string): boolean {
+  return /^(?:Actual Price|Mark units as:|Subtotal|MAXIMUM WEIGHT|Total$|Load:|Payment Terms:|Weight:|Printed:)/i.test(line)
+}
+
+function isLikelyDescriptionLine(line: string): boolean {
+  const normalized = normalizeDescriptionLine(line)
+  if (!normalized) return false
+  if (isSectionBoundary(normalized) || isDescriptionStop(normalized)) return false
+  if (!/[A-Za-z]/.test(normalized)) return false
+  if (/^[\d\s,.$/%:-]+$/.test(normalized)) return false
+  return true
+}
+
+function normalizeRepeatedDigits(value: string): string {
+  const compact = value.replace(/\s+/g, '')
+  if (/^\d+$/.test(compact) && compact.length % 2 === 0) {
+    const half = compact.length / 2
+    if (compact.slice(0, half) === compact.slice(half)) {
+      return compact.slice(0, half)
+    }
+  }
+  return compact
+}
+
+function extractQuantityFromItemLine(line: string): number {
+  const compact = line.replace(/\s+/g, '')
+  const leading = compact.match(/^(\d+)(?:UNIT|U\/IT)/i)?.[1]
+  if (leading) {
+    const quantity = Number(normalizeRepeatedDigits(leading))
+    if (Number.isFinite(quantity)) return quantity
+  }
+
+  const rateQuantity = compact.match(/(\d+)\.00\/(?:UNIT|U\/IT)/i)?.[1]
+  if (rateQuantity) {
+    const quantity = Number(normalizeRepeatedDigits(rateQuantity))
+    if (Number.isFinite(quantity)) return quantity
+  }
+
+  return 0
+}
+
 function collectLeadingDescription(lines: string[], itemIndex: number): string[] {
   const leading: string[] = []
-  let collecting = false
 
   for (let i = itemIndex - 1; i >= 0; i--) {
     const line = lines[i]
-    if (isValueNoise(line)) {
-      if (!collecting) continue
-      break
+    const normalized = normalizeDescriptionLine(line)
+    if (!normalized) {
+      if (leading.length) break
+      continue
     }
-    if (isSectionBoundary(line)) break
-    leading.unshift(line)
-    collecting = true
+    if (isSectionBoundary(normalized)) break
+    if (isDescriptionStop(normalized)) break
+    if (!isLikelyDescriptionLine(line)) {
+      if (leading.length) break
+      continue
+    }
+    leading.unshift(normalized)
   }
 
   return leading
@@ -229,14 +339,16 @@ function collectTrailingDescription(lines: string[], itemIndex: number): string[
 
   for (let i = itemIndex + 1; i < lines.length; i++) {
     const line = lines[i]
-    if (
-      /^(Subtotal|MAXIMUM WEIGHT|Total$|Load:|Payment Terms:|Weight:|Printed:)/i.test(line) ||
-      /^TOTAL$/i.test(line)
-    ) {
+    const normalized = normalizeDescriptionLine(line)
+    if (!normalized) {
+      if (trailing.length) break
+      continue
+    }
+    if (isDescriptionStop(normalized) || /^TOTAL$/i.test(normalized)) {
       break
     }
-    if (isValueNoise(line)) continue
-    trailing.push(line)
+    if (!isLikelyDescriptionLine(line)) continue
+    trailing.push(normalized)
   }
 
   return trailing
@@ -262,13 +374,15 @@ function extractTotalAmount(lines: string[], text: string): number {
 }
 
 function extractPrimaryItem(lines: string[], totalAmount: number) {
-  const inlineItemIndex = lines.findIndex((line) => /^\d(?:\s*\d)*(?:\.\d+)?\s+UNIT\s+[A-Z][A-Z0-9]+/i.test(line))
+  const inlineItemIndex = lines.findIndex((line) => {
+    const compact = line.replace(/\s+/g, '')
+    return /(?:UNIT|U\/IT)/i.test(compact) && /[A-Z]{2,4}\d{3,4}[A-Z]{1,4}(?=\d|[\s/]|$)/i.test(line)
+  })
   if (inlineItemIndex >= 0) {
     const line = lines[inlineItemIndex]
-    const match = line.match(/^((?:\d\s*)+(?:\.\d+)?)\s+UNIT\s+([A-Z][A-Z0-9]+)/i)
-    if (match) {
-      const quantity = Number(match[1].replace(/\s+/g, ''))
-      const itemCode = match[2]
+    const quantity = extractQuantityFromItemLine(line)
+    const itemCode = line.match(/([A-Z]{2,4}\d{3,4}[A-Z]{1,4})(?=\d|[\s/]|$)/i)?.[1]
+    if (quantity && itemCode) {
       const descriptionLines = [
         ...collectLeadingDescription(lines, inlineItemIndex),
         ...collectTrailingDescription(lines, inlineItemIndex),
@@ -277,24 +391,12 @@ function extractPrimaryItem(lines: string[], totalAmount: number) {
     }
   }
 
-  const itemIndex = lines.findIndex((line) => /^(?!TOTAL$)[A-Z]{2,}\d+[A-Z0-9]+$/i.test(line))
+  const itemIndex = lines.findIndex((line) => /^(?!TOTAL$)[A-Z]{2,4}\d{3,4}[A-Z0-9]{1,4}$/i.test(cleanLine(line)))
   if (itemIndex < 0) return null
 
-  const itemCode = lines[itemIndex]
-  let quantity = 0
-  for (let i = itemIndex - 1; i >= Math.max(0, itemIndex - 6); i--) {
-    const match = lines[i].match(/(\d+(?:\.\d+)?)\s*\/(?:\s*UNIT)?$/i)
-    if (match) {
-      quantity = Number(match[1])
-      break
-    }
-  }
-
-  if (!quantity) {
-    const numericWindow = lines.slice(Math.max(0, itemIndex - 6), itemIndex).join(' ')
-    const match = numericWindow.match(/(\d+(?:\.\d+)?)\s*\/\s*UNIT/i)
-    if (match) quantity = Number(match[1])
-  }
+  const itemCode = cleanLine(lines[itemIndex])
+  const numericWindow = lines.slice(Math.max(0, itemIndex - 2), Math.min(lines.length, itemIndex + 2)).join(' ')
+  const quantity = extractQuantityFromItemLine(numericWindow)
 
   const descriptionLines = [
     ...collectLeadingDescription(lines, itemIndex),
@@ -304,7 +406,22 @@ function extractPrimaryItem(lines: string[], totalAmount: number) {
   return buildParsedItem(quantity, itemCode, totalAmount, descriptionLines)
 }
 
-function extractNotes(text: string): string {
+function extractNotes(lines: string[], text: string): string {
+  const startIndex = lines.findIndex((line) => /MAXIMUM WEIGHT/i.test(line))
+  if (startIndex >= 0) {
+    const noteLines: string[] = []
+    for (let i = startIndex; i < lines.length; i++) {
+      const normalized = cleanLine(lines[i])
+      if (!normalized) {
+        if (noteLines.length) break
+        continue
+      }
+      if (/^(Payment Terms:|Weight:|Printed:|Total$|Load:)/i.test(normalized)) break
+      noteLines.push(normalized)
+    }
+    return noteLines.join(' ')
+  }
+
   const noteMatch = text.match(/(MAXIMUM WEIGHT[\s\S]*?)(?:\n\s*\n|Total\b|Payment Terms:|Weight:|$)/i)
   return noteMatch?.[1]?.replace(/\s+/g, ' ').trim() || ''
 }
@@ -313,8 +430,12 @@ function extractPOData(text: string, fileName: string) {
   const normalizedText = normalizePdfText(text)
   const poNumber = extractPONumber(normalizedText, fileName)
 
-  const lines = normalizedText
+  const rawLines = normalizedText
     .split('\n')
+    .map((line) => line.replace(/\r/g, '').trimEnd())
+    .filter((line) => line.trim())
+
+  const lines = rawLines
     .map(cleanLine)
     .filter(Boolean)
 
@@ -322,10 +443,10 @@ function extractPOData(text: string, fileName: string) {
   const shipTo = extractShipTo(lines, normalizedText)
   const date = extractOrderDate(lines)
   const totalAmount = extractTotalAmount(lines, normalizedText)
-  const primaryItem = extractPrimaryItem(lines, totalAmount)
-  const branch = extractBranch(normalizedText)
+  const primaryItem = extractPrimaryItem(rawLines, totalAmount)
   const freightTerm = extractFreightTerm(normalizedText)
-  const notes = extractNotes(normalizedText)
+  const branch = extractBranch(normalizedText, poNumber, freightTerm)
+  const notes = extractNotes(rawLines, normalizedText)
 
   const lineItems = primaryItem ? [primaryItem] : []
 
