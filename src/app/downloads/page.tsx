@@ -5,16 +5,7 @@ import Link from 'next/link'
 import { Download, FileText, ArrowLeft, Package, ChevronDown } from 'lucide-react'
 import { ALL_POS } from '@/lib/po-data'
 
-type SortMode = 'vendor' | 'date' | 'port'
-
-function parseDate(d: string): number {
-  const parts = d.split('/')
-  if (parts.length === 3) {
-    const [m, day, y] = parts
-    return new Date(2000 + parseInt(y), parseInt(m) - 1, parseInt(day)).getTime()
-  }
-  return 0
-}
+type SortMode = 'vendor' | 'processed' | 'port'
 
 export default function DownloadsPage() {
   const [sortMode, setSortMode] = useState<SortMode>('vendor')
@@ -22,38 +13,28 @@ export default function DownloadsPage() {
   const totalValue = ALL_POS.reduce((s, p) => s + p.total_amount, 0)
 
   // Build groups based on sort mode
-  const groupKey = (po: typeof ALL_POS[0]) => {
-    if (sortMode === 'vendor') return po.vendor
-    if (sortMode === 'date') return po.order_date
-    if (sortMode === 'port') return po.freight_term
-    return po.vendor
-  }
+  let groupsMap: Map<string, typeof ALL_POS>
+  let groupKeys: string[]
 
-  const groupsMap = new Map<string, typeof ALL_POS>()
-  const sorted = [...ALL_POS].sort((a, b) => parseDate(a.order_date) - parseDate(b.order_date))
-  for (const po of sorted) {
-    const key = groupKey(po)
-    if (!groupsMap.has(key)) groupsMap.set(key, [])
-    groupsMap.get(key)!.push(po)
-  }
-
-  // Sort group keys
-  const groupKeys = Array.from(groupsMap.keys()).sort((a, b) => {
-    if (sortMode === 'date') return parseDate(a) - parseDate(b)
-    return a.localeCompare(b)
-  })
-
-  const sortLabels: Record<SortMode, string> = {
-    vendor: '按供应商',
-    date: '按时间',
-    port: '按港口',
+  if (sortMode === 'processed') {
+    // Reverse insertion order — most recently processed PO appears first
+    groupsMap = new Map([['All Orders · Most Recent First', [...ALL_POS].reverse()]])
+    groupKeys = ['All Orders · Most Recent First']
+  } else {
+    groupsMap = new Map<string, typeof ALL_POS>()
+    for (const po of ALL_POS) {
+      const key = sortMode === 'vendor' ? po.vendor : po.freight_term
+      if (!groupsMap.has(key)) groupsMap.set(key, [])
+      groupsMap.get(key)!.push(po)
+    }
+    groupKeys = Array.from(groupsMap.keys()).sort((a, b) => a.localeCompare(b))
   }
 
   return (
     <main className="max-w-5xl mx-auto py-8 px-4">
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">NDC Purchase Orders</h1>
+          <h1 className="text-3xl font-bold text-gray-900">IGF Purchase Orders</h1>
           <p className="text-gray-500 mt-1">
             {ALL_POS.length} POs &nbsp;·&nbsp; Total:{' '}
             <span className="font-semibold text-gray-700">
@@ -62,16 +43,15 @@ export default function DownloadsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Sort dropdown */}
           <div className="relative">
             <select
               value={sortMode}
               onChange={e => setSortMode(e.target.value as SortMode)}
               className="appearance-none bg-white border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
             >
-              <option value="vendor">按供应商</option>
-              <option value="date">按时间</option>
-              <option value="port">按港口</option>
+              <option value="vendor">By Vendor</option>
+              <option value="processed">By Date Processed</option>
+              <option value="port">By Port</option>
             </select>
             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
           </div>
