@@ -173,7 +173,7 @@ function extractPOData(text: string, fileName: string) {
 
     const specBody = [...preSpec, ...postSpec].join('\n')
     const description = specBody
-      ? `${qty} Units ${itemCode}\n${specBody}`
+      ? `${qty} Units ${itemCode} — ${specBody}`
       : `${qty} Units ${itemCode}`
 
     lineItems.push({ description, quantity: qty, unitPrice, amount })
@@ -225,7 +225,7 @@ function extractPOData(text: string, fileName: string) {
 
       const specBody = [...preSpec, ...postSpec].join('\n')
       const description = specBody
-        ? `${qty} Units ${itemCode}\n${specBody}`
+        ? `${qty} Units ${itemCode} — ${specBody}`
         : `${qty} Units ${itemCode}`
       lineItems.push({ description, quantity: qty, unitPrice, amount })
     }
