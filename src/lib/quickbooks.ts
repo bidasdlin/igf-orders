@@ -41,7 +41,7 @@ async function getAccessToken(): Promise<string> {
 
   const data = await response.json()
   cachedAccessToken = data.access_token
-  tokenExpiry = Date.now() + (data.expires_in - 60) * 1000 // refresh 1 min early
+  tokenExpiry = Date.now() + (data.expires_in - 60) * 1000
   return cachedAccessToken!
 }
 
@@ -78,11 +78,11 @@ export interface IGFPOLineItem {
 }
 
 export interface IGFPurchaseOrder {
-  poNumber: string          // e.g. "UFP-IGF-104657"
-  customerPONumber: string  // e.g. "104657"
-  vendorName: string        // e.g. "United Forest Products PTE"
-  shipTo: string            // e.g. "Port of Los Angeles, CA"
-  date: string              // e.g. "02/19/2026"
+  poNumber: string
+  customerPONumber: string
+  vendorName: string
+  shipTo: string
+  date: string
   lineItems: IGFPOLineItem[]
   totalAmount: number
   notes?: string
@@ -116,11 +116,9 @@ export interface QBPurchaseOrder {
 
 // ─── Account lookup ────────────────────────────────────────────────────────────
 
-// Find the Cost of Goods Sold account (or any CostOfGoodsSold-type account)
 async function getCogsAccount(): Promise<{ value: string; name: string }> {
   if (cachedCogsAccount) return cachedCogsAccount
 
-  // Try exact name match first
   const nameQuery = `SELECT * FROM Account WHERE Name = 'Cost of Goods Sold' MAXRESULTS 1`
   const nameData = await qbRequest('GET', `query?query=${encodeURIComponent(nameQuery)}`)
   const byName = nameData.QueryResponse?.Account?.[0]
@@ -129,7 +127,6 @@ async function getCogsAccount(): Promise<{ value: string; name: string }> {
     return cachedCogsAccount
   }
 
-  // Fall back to any CostOfGoodsSold account type
   const typeQuery = `SELECT * FROM Account WHERE AccountType = 'Cost of Goods Sold' MAXRESULTS 1`
   const typeData = await qbRequest('GET', `query?query=${encodeURIComponent(typeQuery)}`)
   const byType = typeData.QueryResponse?.Account?.[0]
@@ -138,7 +135,6 @@ async function getCogsAccount(): Promise<{ value: string; name: string }> {
     return cachedCogsAccount
   }
 
-  // Last resort: any Expense account
   const expQuery = `SELECT * FROM Account WHERE AccountType = 'Expense' MAXRESULTS 1`
   const expData = await qbRequest('GET', `query?query=${encodeURIComponent(expQuery)}`)
   const byExp = expData.QueryResponse?.Account?.[0]
@@ -147,7 +143,7 @@ async function getCogsAccount(): Promise<{ value: string; name: string }> {
     return cachedCogsAccount
   }
 
-  throw new Error('No suitable account found in QuickBooks. Please ensure a Cost of Goods Sold or Expense account exists.')
+  throw new Error('No suitable account found in QuickBooks.')
 }
 
 // ─── Vendor operations ────────────────────────────────────────────────────────
@@ -155,7 +151,6 @@ async function getCogsAccount(): Promise<{ value: string; name: string }> {
 export async function searchVendor(vendorName: string): Promise<QBVendor | null> {
   const query = `SELECT * FROM Vendor WHERE DisplayName = '${vendorName.replace(/'/g, "\\'")}' MAXRESULTS 1`
   const data = await qbRequest('GET', `query?query=${encodeURIComponent(query)}`)
-
   const vendors = data.QueryResponse?.Vendor
   return vendors?.[0] ?? null
 }
@@ -184,7 +179,6 @@ export async function createPurchaseOrder(po: IGFPurchaseOrder): Promise<QBPurch
   ])
 
   const txnDate = (() => {
-    // Accept YYYY-MM-DD (ISO) or MM/DD/YYYY
     if (po.date.match(/^\d{4}-\d{2}-\d{2}$/)) return po.date
     const parts = po.date.split('/')
     if (parts.length === 3) return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`
@@ -192,8 +186,6 @@ export async function createPurchaseOrder(po: IGFPurchaseOrder): Promise<QBPurch
   })()
 
   const lines = po.lineItems.map((item, index) => {
-    // Support both "qty" and "quantity" field names (frontend sends "quantity")
-    const qty = (item as any).quantity ?? item.qty ?? 1
     return {
       DetailType: 'AccountBasedExpenseLineDetail',
       Amount: item.amount,
@@ -201,44 +193,29 @@ export async function createPurchaseOrder(po: IGFPurchaseOrder): Promise<QBPurch
       AccountBasedExpenseLineDetail: {
         AccountRef: cogsAccount,
         BillableStatus: 'NotBillable',
-        Qty: qty,
-        UnitPrice: item.unitPrice,
       },
       LineNum: index + 1,
     }
   })
 
-  // Add shipping note as last line if provided
-  const notesLine = po.notes ? [{
-    DetailType: 'AccountBasedExpenseLineDetail',
-    Amount: 0,
-    Description: po.notes,
-    AccountBasedExpenseLineDetail: {
-      AccountRef: cogsAccount,
-      BillableStatus: 'NotBillable',
-    },
-    LineNum: po.lineItems.length + 1,
-  }] : []
-
   const body = {
     DocNumber: po.poNumber,
     TxnDate: txnDate,
     VendorRef: { value: vendor.Id, name: vendor.DisplayName },
-    ShipTo: { Line1: po.shipTo },
     POStatus: 'Open',
-    TotalAmt: po.totalAmount,
-    Line: [...lines, ...notesLine],
-    CustomField: [
-      { DefinitionId: '1', Name: 'Customer PO#', Type: 'StringType', StringValue: po.customerPONumber },
-    ],
-    PrivateNote: `IGF Customer PO: ${po.customerPONumber} | Ship to: ${po.shipTo}`,
+    Line: lines,
+    Memo: `Customer PO#: ${po.customerPONumber} | Ship to: ${po.shipTo}`,
+    PrivateNote: [
+      `IGF Customer PO: ${po.customerPONumber}`,
+      `Ship to: ${po.shipTo}`,
+      po.notes ?? '',
+    ].filter(Boolean).join(' | '),
   }
 
   const data = await qbRequest('POST', 'purchaseorder', body)
   return data.PurchaseOrder
 }
 
-// List all purchase orders, optionally filtered by date
 export async function listPurchaseOrders(params?: {
   startDate?: string
   endDate?: string
