@@ -32,6 +32,14 @@ function parseQBDescription(desc: string): { qty: number; itemCode: string; desc
 }
 
 // Parse QB memo: "NDC Branch: XA | DDP-SAV | APW1822KRO"
+function getVendorCode(vendorName: string): string {
+  const skip = new Set(['inc', 'ind', 'co', 'corp', 'ltd', 'llc', 'company', 'international', 'group'])
+  return vendorName.split(/\s+/)
+    .filter(w => w.length > 0 && !skip.has(w.toLowerCase()))
+    .map(w => w[0].toUpperCase())
+    .join('')
+}
+
 function parseMemo(memo: string): { branch: string; freightTerm: string } {
   const m = memo.match(/NDC Branch:\s*(\S+)\s*\|\s*(\S+)/)
   return { branch: m?.[1] ?? '', freightTerm: m?.[2] ?? '' }
@@ -161,7 +169,7 @@ export async function GET(
   page.drawText('VENDOR',  { x: c1, y, font: fontR, size: 7, color: medGray })
   page.drawText('SHIP TO', { x: c2, y, font: fontR, size: 7, color: medGray })
   page.drawText('P.O.',    { x: c3, y, font: fontR, size: 7, color: medGray })
-  const poRef = 'NDC-IGF-' + docNumber.replace(/^0+/, '')
+  const poRef = getVendorCode(vendorName) + '-IGF-' + docNumber.replace(/^0+/, '')
   page.drawText(poRef, { x: c4, y, font: fontR, size: 9, color: black })
 
   y -= 13
