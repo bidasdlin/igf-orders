@@ -1,6 +1,46 @@
 import { PDFDocument, rgb, StandardFonts, PDFFont } from 'pdf-lib'
 import { getPurchaseOrderByDocNumber } from '@/lib/quickbooks'
 
+interface DirectLineItemInput {
+  description: string
+  quantity?: number
+  qty?: number
+  unitPrice?: number
+  amount: number
+}
+
+interface DirectPOInput {
+  poNumber: string
+  vendorName: string
+  shipTo?: string
+  date: string
+  expShipDate?: string
+  lineItems: DirectLineItemInput[]
+  totalAmount: number
+  notes?: string
+  branch?: string
+  freightTerm?: string
+}
+
+interface RenderedLineItem {
+  qty: number
+  itemCode: string
+  description: string
+  amount: number
+}
+
+interface RenderedPO {
+  vendorName: string
+  orderDate: string
+  docNumber: string
+  freightTerm: string
+  expShipDate: string
+  shipTo: string
+  items: RenderedLineItem[]
+  totalAmt: number
+  weightNote: string
+}
+
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   text = sanitize(text)
   const lines: string[] = []
@@ -130,72 +170,110 @@ function formatDate(txnDate: string): string {
   return `${m}/${d}/${y.slice(2)}`
 }
 
-export async function GET(
-  _request: Request,
-  { params }: { params: { poNumber: string } }
-) {
-  let qbPO: Record<string, unknown> | null = null
-  try {
-    qbPO = await getPurchaseOrderByDocNumber(params.poNumber)
-  } catch (err) {
-    return new Response(`QB error: ${String(err)}`, { status: 500 })
-  }
-  if (!qbPO) return new Response('PO not found in QuickBooks', { status: 404 })
-
-  // Deep-sanitize all string fields from QB before PDF generation
-  function deepSanitize(obj: unknown): unknown {
-    if (typeof obj === 'string') return sanitize(obj)
-    if (Array.isArray(obj)) return obj.map(deepSanitize)
-    if (obj && typeof obj === 'object') {
-      const r: Record<string, unknown> = {}
-      for (const k of Object.keys(obj as object)) r[k] = deepSanitize((obj as Record<string,unknown>)[k])
-      return r
+function deepSanitize(obj: unknown): unknown {
+  if (typeof obj === 'string') return sanitize(obj)
+  if (Array.isArray(obj)) return obj.map(deepSanitize)
+  if (obj && typeof obj === 'object') {
+    const record: Record<string, unknown> = {}
+    for (const key of Object.keys(obj as object)) {
+      record[key] = deepSanitize((obj as Record<string, unknown>)[key])
     }
-    return obj
+    return record
   }
-  qbPO = deepSanitize(qbPO) as Record<string, unknown>
+  return obj
+}
 
+const portMap: Record<string, string> = {
+  LA: 'Port of Los Angeles, CA', SAV: 'Port of Savannah, GA',
+  HOU: 'Port of Houston, TX', NY: 'Port of New York, NJ',
+  XA: 'Port of Savannah, GA', TEXAS: 'Port of Houston, TX',
+  NE: 'Port of Newark, NJ', VANC: 'Port of Portland, OR',
+  NOR: 'Port of Norfolk, VA', SEA: 'Port of Seattle, WA',
+}
+
+const weightMap: Record<string, string> = {
+  LA: 'MAXIMUM WEIGHT TO LOS ANGELES IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US REGARDING REDUCING WEIGHT ON THE CONTAINER',
+  SAV: 'MAXIMUM WEIGHT TO SAVANNAH IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
+  XA: 'MAXIMUM WEIGHT TO SAVANNAH IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
+  HOU: 'MAXIMUM WEIGHT TO HOUSTON IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
+  TEXAS: 'MAXIMUM WEIGHT TO HOUSTON IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
+  NY: 'MAXIMUM WEIGHT TO NEW YORK IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
+  NE: 'MAXIMUM WEIGHT TO NEW YORK IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
+}
+
+function toRenderedLineItem(item: DirectLineItemInput): RenderedLineItem {
+  const parsed = parseQBDescription(item.description ?? '')
+  return {
+    qty: Number(item.quantity ?? item.qty ?? parsed.qty ?? 0),
+    itemCode: parsed.itemCode,
+    description: parsed.description || sanitize(item.description ?? ''),
+    amount: Number(item.amount ?? 0),
+  }
+}
+
+function buildRenderedPOFromInput(input: DirectPOInput, fallbackDocNumber: string): RenderedPO {
+  const branch = sanitize(input.branch ?? '').trim()
+  return {
+    vendorName: sanitize(input.vendorName ?? 'Unknown Vendor'),
+    orderDate: formatDate(input.date ?? ''),
+    docNumber: sanitize(input.poNumber || fallbackDocNumber),
+    freightTerm: sanitize(input.freightTerm ?? '').trim(),
+    expShipDate: sanitize(input.expShipDate ?? '').trim(),
+    shipTo: sanitize(input.shipTo ?? '').trim() || portMap[branch] || branch,
+    items: Array.isArray(input.lineItems) ? input.lineItems.map(toRenderedLineItem) : [],
+    totalAmt: Number(input.totalAmount ?? 0),
+    weightNote: sanitize(input.notes ?? '').trim() || weightMap[branch] || '',
+  }
+}
+
+function buildRenderedPOFromQB(qbPO: Record<string, unknown>, fallbackDocNumber: string): RenderedPO {
   type VendorRef = { name?: string }
   const vendorName = (qbPO.VendorRef as VendorRef)?.name ?? 'Unknown Vendor'
   const txnDate = (qbPO.TxnDate as string) ?? ''
   const orderDate = formatDate(txnDate)
-  const docNumber = (qbPO.DocNumber as string) ?? params.poNumber
+  const docNumber = (qbPO.DocNumber as string) ?? fallbackDocNumber
   const memo = (qbPO.Memo as string) ?? ''
   const privateNote = (qbPO.PrivateNote as string) ?? ''
   const totalAmt = (qbPO.TotalAmt as number) ?? 0
   const { branch, freightTerm, expShipDate, shipTo: metadataShipTo, notes } = parseMetadata(memo, privateNote)
 
   type QBLine = { DetailType?: string; Description?: string; Amount?: number }
-  const rawLines = ((qbPO.Line as QBLine[]) ?? []).filter(l => l.DetailType !== 'SubTotalLine')
-  const items = rawLines.map(l => {
-    const parsed = parseQBDescription(l.Description ?? '')
+  const rawLines = ((qbPO.Line as QBLine[]) ?? []).filter((line) => line.DetailType !== 'SubTotalLine')
+  const items = rawLines.map((line) => {
+    const parsed = parseQBDescription(line.Description ?? '')
     return {
       qty: parsed.qty,
       itemCode: parsed.itemCode,
       description: parsed.description,
-      amount: l.Amount ?? 0,
+      amount: line.Amount ?? 0,
     }
   })
 
-  const portMap: Record<string, string> = {
-    LA: 'Port of Los Angeles, CA', SAV: 'Port of Savannah, GA',
-    HOU: 'Port of Houston, TX', NY: 'Port of New York, NJ',
-    XA: 'Port of Savannah, GA', TEXAS: 'Port of Houston, TX',
-    NE: 'Port of Newark, NJ', VANC: 'Port of Portland, OR',
-    NOR: 'Port of Norfolk, VA', SEA: 'Port of Seattle, WA',
+  return {
+    vendorName,
+    orderDate,
+    docNumber,
+    freightTerm,
+    expShipDate,
+    shipTo: metadataShipTo || portMap[branch] || branch,
+    items,
+    totalAmt,
+    weightNote: notes || weightMap[branch] || '',
   }
-  const shipTo = metadataShipTo || portMap[branch] || branch
+}
 
-  const weightMap: Record<string, string> = {
-    LA: 'MAXIMUM WEIGHT TO LOS ANGELES IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US REGARDING REDUCING WEIGHT ON THE CONTAINER',
-    SAV: 'MAXIMUM WEIGHT TO SAVANNAH IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
-    XA: 'MAXIMUM WEIGHT TO SAVANNAH IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
-    HOU: 'MAXIMUM WEIGHT TO HOUSTON IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
-    TEXAS: 'MAXIMUM WEIGHT TO HOUSTON IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
-    NY: 'MAXIMUM WEIGHT TO NEW YORK IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
-    NE: 'MAXIMUM WEIGHT TO NEW YORK IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
-  }
-  const weightNote = notes || weightMap[branch] || ''
+async function renderPurchaseOrderPdf(data: RenderedPO) {
+  const {
+    vendorName,
+    orderDate,
+    docNumber,
+    freightTerm,
+    expShipDate,
+    shipTo,
+    items,
+    totalAmt,
+    weightNote,
+  } = data
 
   const pdfDoc = await PDFDocument.create()
   const page = pdfDoc.addPage([612, 792])
@@ -348,4 +426,40 @@ export async function GET(
       'Content-Disposition': `attachment; filename="PO-${docNumber}.pdf"`,
     },
   })
+}
+
+export async function GET(
+  _request: Request,
+  { params }: { params: { poNumber: string } }
+) {
+  let qbPO: Record<string, unknown> | null = null
+  try {
+    qbPO = await getPurchaseOrderByDocNumber(params.poNumber)
+  } catch (err) {
+    return new Response(`QB error: ${String(err)}`, { status: 500 })
+  }
+  if (!qbPO) return new Response('PO not found in QuickBooks', { status: 404 })
+
+  return renderPurchaseOrderPdf(
+    buildRenderedPOFromQB(deepSanitize(qbPO) as Record<string, unknown>, params.poNumber),
+  )
+}
+
+export async function POST(
+  request: Request,
+  { params }: { params: { poNumber: string } }
+) {
+  let payload: DirectPOInput
+
+  try {
+    payload = await request.json()
+  } catch {
+    return new Response('Invalid PDF payload', { status: 400 })
+  }
+
+  if (!payload?.poNumber || !Array.isArray(payload.lineItems) || payload.lineItems.length === 0) {
+    return new Response('Missing PO payload', { status: 400 })
+  }
+
+  return renderPurchaseOrderPdf(buildRenderedPOFromInput(payload, params.poNumber))
 }

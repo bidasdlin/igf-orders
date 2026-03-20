@@ -13,6 +13,24 @@ interface SyncedPO {
   qbId?: string
   qbDocNumber?: string
   syncedAt?: string
+  sourceData?: {
+    poNumber: string
+    vendorName: string
+    shipTo: string
+    date: string
+    expShipDate?: string
+    lineItems: Array<{
+      description: string
+      quantity?: number
+      qty?: number
+      unitPrice?: number
+      amount: number
+    }>
+    totalAmount: number
+    notes?: string
+    branch?: string
+    freightTerm?: string
+  }
 }
 
 export default function DownloadsPage() {
@@ -57,6 +75,18 @@ export default function DownloadsPage() {
     setSelectedKeys(pos.map((po, index) => getEntryKey(po, index)))
   }
 
+  async function fetchPdf(po: SyncedPO) {
+    const docNumber = po.qbDocNumber || po.poNumber
+    if (po.sourceData) {
+      return fetch(`/api/generate-po-pdf/${encodeURIComponent(docNumber)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(po.sourceData),
+      })
+    }
+    return fetch(`/api/generate-po-pdf/${encodeURIComponent(docNumber)}`)
+  }
+
   async function downloadBatch() {
     const selected = pos.filter((po, index) => selectedKeys.includes(getEntryKey(po, index)))
     if (selected.length === 0) {
@@ -74,7 +104,7 @@ export default function DownloadsPage() {
       for (let i = 0; i < selected.length; i++) {
         const po = selected[i]
         const docNumber = po.qbDocNumber || po.poNumber
-        const response = await fetch(`/api/generate-po-pdf/${docNumber}`)
+        const response = await fetchPdf(po)
         if (!response.ok) {
           throw new Error(`Failed to generate PDF for ${docNumber}`)
         }
@@ -109,9 +139,9 @@ export default function DownloadsPage() {
           <div className="panel subtle-grid px-6 py-8 md:px-8 md:py-10">
             <span className="eyebrow">Downloads desk</span>
             <div className="mt-6 max-w-3xl space-y-4">
-              <h1 className="display-title">Pull the final vendor PDFs after QuickBooks sync.</h1>
+              <h1 className="display-title">Pull the final vendor PDFs for the current batch.</h1>
               <p className="max-w-2xl text-base leading-7 text-[var(--muted)] md:text-lg">
-                This browser keeps a rolling history of processed purchase orders so you can reopen the generated PDF or jump straight into QuickBooks.
+                This browser keeps a rolling history of processed purchase orders so you can reopen the generated PDF or jump straight into QuickBooks when it is available.
               </p>
             </div>
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -127,7 +157,7 @@ export default function DownloadsPage() {
                   tone: 'text-[var(--accent)]',
                 },
                 {
-                  label: 'Latest sync',
+                  label: 'Latest activity',
                   value: loaded ? (latestSync || 'No sync yet') : '--',
                   tone: 'text-[var(--warm)]',
                 },
@@ -136,7 +166,7 @@ export default function DownloadsPage() {
                   <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--muted)]">
                     {item.label}
                   </div>
-                  <div className={`mt-3 text-sm font-semibold ${item.tone} ${item.label === 'Latest sync' ? '' : 'font-data text-xl'}`}>
+                  <div className={`mt-3 text-sm font-semibold ${item.tone} ${item.label === 'Latest activity' ? '' : 'font-data text-xl'}`}>
                     {item.value}
                   </div>
                 </div>
@@ -183,7 +213,7 @@ export default function DownloadsPage() {
             <div className="flex flex-col gap-3 border-b border-[var(--border)] pb-5 md:flex-row md:items-end md:justify-between">
               <div>
                 <div className="eyebrow">Processed output</div>
-                <h2 className="section-title mt-4">Recent QuickBooks purchase orders</h2>
+                <h2 className="section-title mt-4">Recent purchase orders</h2>
               </div>
               <p className="text-sm leading-6 text-[var(--muted)]">
                 One click downloads the current batch. You can still uncheck any row you do not want.
@@ -283,15 +313,30 @@ export default function DownloadsPage() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      <a
-                        href={`/api/generate-po-pdf/${po.qbDocNumber || po.poNumber}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setBatchError(null)
+                          const response = await fetchPdf(po)
+                          if (!response.ok) {
+                            setBatchError(`Failed to generate PDF for ${po.qbDocNumber || po.poNumber}`)
+                            return
+                          }
+                          const fileBlob = await response.blob()
+                          const url = URL.createObjectURL(fileBlob)
+                          const link = document.createElement('a')
+                          link.href = url
+                          link.download = `PO-${po.qbDocNumber || po.poNumber}.pdf`
+                          document.body.appendChild(link)
+                          link.click()
+                          link.remove()
+                          URL.revokeObjectURL(url)
+                        }}
                         className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[#0c645e]"
                       >
                         <Download className="h-4 w-4" />
                         Download PDF
-                      </a>
+                      </button>
                       {po.qbId && (
                         <a
                           href={`https://qbo.intuit.com/app/purchaseorder?txnId=${po.qbId}`}

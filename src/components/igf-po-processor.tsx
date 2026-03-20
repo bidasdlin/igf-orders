@@ -41,19 +41,70 @@ interface ParsedPO {
   syncedAt?: string
 }
 
-function saveToHistory(po: ParsedPO) {
+interface HistoryPO {
+  poNumber: string
+  vendorName: string
+  shipTo: string
+  totalAmount: number
+  qbId?: string
+  qbDocNumber?: string
+  syncedAt?: string
+  sourceData?: {
+    poNumber: string
+    vendorName: string
+    shipTo: string
+    date: string
+    expShipDate?: string
+    lineItems: LineItem[]
+    totalAmount: number
+    notes?: string
+    branch?: string
+    freightTerm?: string
+  }
+}
+
+function buildActivityStamp() {
+  return `${new Date().toLocaleString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: '2-digit',
+    day: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })} PST`
+}
+
+function saveToHistory(po: ParsedPO, activityAt = po.syncedAt) {
   try {
     const key = 'igf_synced_pos'
     const existing = JSON.parse(localStorage.getItem(key) || '[]')
-    const filtered = existing.filter((item: { poNumber: string }) => item.poNumber !== po.poNumber)
+    const docNumber = po.qbDocNumber || po.poNumber
+    const filtered = existing.filter((item: HistoryPO) =>
+      item.poNumber !== po.poNumber &&
+      item.poNumber !== docNumber &&
+      item.qbDocNumber !== docNumber,
+    )
     filtered.unshift({
-      poNumber: po.qbDocNumber || po.poNumber,
+      poNumber: docNumber,
       vendorName: po.vendorName,
       shipTo: po.shipTo,
       totalAmount: po.totalAmount,
       qbId: po.qbId,
       qbDocNumber: po.qbDocNumber,
-      syncedAt: po.syncedAt,
+      syncedAt: activityAt,
+      sourceData: {
+        poNumber: docNumber,
+        vendorName: po.vendorName,
+        shipTo: po.shipTo,
+        date: po.date,
+        expShipDate: po.expShipDate,
+        lineItems: po.lineItems,
+        totalAmount: po.totalAmount,
+        notes: po.notes,
+        branch: po.branch,
+        freightTerm: po.freightTerm,
+      },
     })
     localStorage.setItem(key, JSON.stringify(filtered.slice(0, 500)))
   } catch (_) {
@@ -99,6 +150,7 @@ export function IGFPOProcessor() {
   const [parsingFiles, setParsingFiles] = useState<string[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [isBatchSyncing, setIsBatchSyncing] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const ordersRef = useRef<ParsedPO[]>([])
   const parsingFilesRef = useRef<string[]>([])
@@ -209,15 +261,7 @@ export function IGFPOProcessor() {
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
 
-      const syncedAt = `${new Date().toLocaleString('en-US', {
-        timeZone: 'America/Los_Angeles',
-        month: '2-digit',
-        day: '2-digit',
-        year: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      })} PST`
+      const syncedAt = buildActivityStamp()
 
       const updated: ParsedPO = {
         ...order,
@@ -235,6 +279,53 @@ export function IGFPOProcessor() {
           ? { ...item, status: 'error', error: err instanceof Error ? err.message : 'Sync failed' }
           : item
       ))
+    }
+  }, [])
+
+  const downloadOrderPdf = useCallback(async (order: ParsedPO) => {
+    setDownloadingId(order.id)
+    try {
+      const docNumber = order.qbDocNumber || order.poNumber
+      const response = await fetch(`/api/generate-po-pdf/${encodeURIComponent(docNumber)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          poNumber: docNumber,
+          vendorName: order.vendorName,
+          shipTo: order.shipTo,
+          date: order.date,
+          expShipDate: order.expShipDate,
+          lineItems: order.lineItems,
+          totalAmount: order.totalAmount,
+          notes: order.notes,
+          branch: order.branch,
+          freightTerm: order.freightTerm,
+        }),
+      })
+      if (!response.ok) {
+        throw new Error(`PDF export failed for ${docNumber}`)
+      }
+
+      const fileBlob = await response.blob()
+      const url = URL.createObjectURL(fileBlob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `PO-${docNumber}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+
+      saveToHistory(order, order.syncedAt || buildActivityStamp())
+    } catch (error) {
+      console.error('PDF export failed:', error)
+      setOrders((prev) => prev.map((item) =>
+        item.id === order.id
+          ? { ...item, error: error instanceof Error ? error.message : 'PDF export failed' }
+          : item
+      ))
+    } finally {
+      setDownloadingId(null)
     }
   }, [])
 
@@ -539,16 +630,16 @@ export function IGFPOProcessor() {
                         </button>
                       )}
 
-                      {order.status === 'synced' && (
-                        <a
-                          href={`/api/generate-po-pdf/${order.qbDocNumber}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                      {order.status !== 'syncing' && (
+                        <button
+                          type="button"
+                          onClick={() => downloadOrderPdf(order)}
+                          disabled={downloadingId === order.id}
                           className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[#0c645e]"
                         >
-                          <Download className="h-4 w-4" />
+                          {downloadingId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                           Download PDF
-                        </a>
+                        </button>
                       )}
 
                       <button
