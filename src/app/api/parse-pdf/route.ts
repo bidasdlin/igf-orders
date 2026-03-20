@@ -172,6 +172,14 @@ function extractExpShipDate(lines: string[], orderDate: string): string | undefi
     if (parsed) return parsed
   }
 
+  const orderLabelIndex = lines.findIndex((line) => line.toLowerCase().includes('order date:'))
+  if (orderLabelIndex >= 0) {
+    for (let i = orderLabelIndex; i <= Math.min(lines.length - 1, orderLabelIndex + 3); i++) {
+      const parsed = normalizeDateCandidate(lines[i])
+      if (parsed && parsed !== orderDate) return parsed
+    }
+  }
+
   const labelIndex = lines.findIndex((line) => line.toLowerCase().includes('exp ship date:'))
   if (labelIndex >= 0) {
     for (let i = Math.max(0, labelIndex - 2); i <= Math.min(lines.length - 1, labelIndex + 2); i++) {
