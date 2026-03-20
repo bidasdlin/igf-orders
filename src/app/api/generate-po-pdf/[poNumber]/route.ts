@@ -53,28 +53,75 @@ function getVendorCode(vendorName: string): string {
     .join('')
 }
 
-function parseMemo(memo: string) {
-  const branch = memo.match(/NDC Branch:\s*([A-Z]+)/i)?.[1] ?? ''
-  const freightTerm = memo.match(/(?:Frt Term|Freight Term):\s*([A-Z]+-[A-Z]+)/i)?.[1]
-    ?? memo.match(/\b(DDP|FOB|CIF|CFR|FCA|CPT|CIP|DAP|DPU|EXW)-[A-Z]+\b/i)?.[0]
-    ?? ''
-  if (branch || freightTerm) return { branch, freightTerm }
+function parseMetadata(...values: string[]) {
+  const parts = Array.from(new Set(values
+    .flatMap((value) => value.split('|'))
+    .map((value) => sanitize(value).trim())
+    .filter(Boolean)))
 
-  const shipToM = memo.match(/[Ss]hip to:\s*([^|]+)/i)
-  if (shipToM) {
-    const shipToFull = shipToM[1].trim()
-    const branchMap: Record<string, string> = {
-      'Los Angeles': 'LA', 'Savannah': 'SAV', 'Houston': 'HOU',
-      'New York': 'NY', 'Newark': 'NE', 'Portland': 'VANC',
-      'Seattle': 'SEA', 'Norfolk': 'NOR',
-    }
-    let derivedBranch = ''
-    for (const key of Object.keys(branchMap)) {
-      if (shipToFull.includes(key)) { derivedBranch = branchMap[key]; break }
-    }
-    return { branch: derivedBranch, freightTerm }
+  const branchMap: Record<string, string> = {
+    'Los Angeles': 'LA', 'Savannah': 'SAV', 'Houston': 'HOU',
+    'New York': 'NY', 'Newark': 'NE', 'Portland': 'VANC',
+    'Seattle': 'SEA', 'Norfolk': 'NOR',
   }
-  return { branch: '', freightTerm: '' }
+
+  let branch = ''
+  let freightTerm = ''
+  let expShipDate = ''
+  let shipTo = ''
+  const notes: string[] = []
+
+  for (const part of parts) {
+    const branchMatch = part.match(/NDC Branch:\s*([A-Z]+)/i)?.[1]
+    if (branchMatch) {
+      branch = branchMatch
+      continue
+    }
+
+    const freightMatch = part.match(/(?:Frt Term|Freight Term):\s*([A-Z]+-[A-Z]+)/i)?.[1]
+      ?? part.match(/\b(DDP|FOB|CIF|CFR|FCA|CPT|CIP|DAP|DPU|EXW)-[A-Z]+\b/i)?.[0]
+    if (freightMatch) {
+      freightTerm = freightMatch
+      continue
+    }
+
+    const expShipMatch = part.match(/Exp Ship Date:\s*([0-9/-]+)/i)?.[1]
+    if (expShipMatch) {
+      expShipDate = expShipMatch
+      continue
+    }
+
+    const shipToMatch = part.match(/[Ss]hip to:\s*(.+)/i)?.[1]
+    if (shipToMatch) {
+      shipTo = shipToMatch.trim()
+      continue
+    }
+
+    if (
+      !/^IGF Customer PO:/i.test(part) &&
+      !/^Customer PO#:/i.test(part) &&
+      !/^[Ss]hip to:\s*$/i.test(part)
+    ) {
+      notes.push(part)
+    }
+  }
+
+  if (!branch && shipTo) {
+    for (const key of Object.keys(branchMap)) {
+      if (shipTo.includes(key)) {
+        branch = branchMap[key]
+        break
+      }
+    }
+  }
+
+  return {
+    branch,
+    freightTerm,
+    expShipDate,
+    shipTo,
+    notes: notes.join(' | '),
+  }
 }
 
 function formatDate(txnDate: string): string {
@@ -113,9 +160,10 @@ export async function GET(
   const txnDate = (qbPO.TxnDate as string) ?? ''
   const orderDate = formatDate(txnDate)
   const docNumber = (qbPO.DocNumber as string) ?? params.poNumber
-  const memo = (qbPO.Memo as string) ?? (qbPO.PrivateNote as string) ?? ''
+  const memo = (qbPO.Memo as string) ?? ''
+  const privateNote = (qbPO.PrivateNote as string) ?? ''
   const totalAmt = (qbPO.TotalAmt as number) ?? 0
-  const { branch, freightTerm } = parseMemo(memo)
+  const { branch, freightTerm, expShipDate, shipTo: metadataShipTo, notes } = parseMetadata(memo, privateNote)
 
   type QBLine = { DetailType?: string; Description?: string; Amount?: number }
   const rawLines = ((qbPO.Line as QBLine[]) ?? []).filter(l => l.DetailType !== 'SubTotalLine')
@@ -136,7 +184,7 @@ export async function GET(
     NE: 'Port of Newark, NJ', VANC: 'Port of Portland, OR',
     NOR: 'Port of Norfolk, VA', SEA: 'Port of Seattle, WA',
   }
-  const shipTo = portMap[branch] ?? branch
+  const shipTo = metadataShipTo || portMap[branch] || branch
 
   const weightMap: Record<string, string> = {
     LA: 'MAXIMUM WEIGHT TO LOS ANGELES IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US REGARDING REDUCING WEIGHT ON THE CONTAINER',
@@ -147,7 +195,7 @@ export async function GET(
     NY: 'MAXIMUM WEIGHT TO NEW YORK IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
     NE: 'MAXIMUM WEIGHT TO NEW YORK IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
   }
-  const weightNote = weightMap[branch] ?? ''
+  const weightNote = notes || weightMap[branch] || ''
 
   const pdfDoc = await PDFDocument.create()
   const page = pdfDoc.addPage([612, 792])
@@ -216,6 +264,10 @@ export async function GET(
 
   y -= 13
   if (freightTerm) page.drawText(sanitize(freightTerm), { x: c1, y, font: fontR, size: 8, color: darkGray })
+  if (expShipDate) {
+    page.drawText(sanitize('EXP SHIP DATE'), { x: c3, y, font: fontR, size: 7, color: medGray })
+    page.drawText(sanitize(formatDate(expShipDate)), { x: c4, y, font: fontR, size: 9, color: black })
+  }
 
   y -= 22
   page.drawText(sanitize('DESTINATION'), { x: c1, y, font: fontR, size: 7, color: medGray })

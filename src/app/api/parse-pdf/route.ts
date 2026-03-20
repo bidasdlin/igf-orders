@@ -165,6 +165,30 @@ function extractOrderDate(lines: string[]): string {
   return findDateAroundLabel(lines, 'Order Date:')
 }
 
+function extractExpShipDate(lines: string[], orderDate: string): string | undefined {
+  const expLine = lines.find((entry) => entry.toLowerCase().includes('exp ship date:') && /\d/.test(entry))
+  if (expLine) {
+    const parsed = normalizeDateCandidate(expLine)
+    if (parsed) return parsed
+  }
+
+  const labelIndex = lines.findIndex((line) => line.toLowerCase().includes('exp ship date:'))
+  if (labelIndex >= 0) {
+    for (let i = Math.max(0, labelIndex - 2); i <= Math.min(lines.length - 1, labelIndex + 2); i++) {
+      const parsed = normalizeDateCandidate(lines[i])
+      if (parsed && parsed !== orderDate) return parsed
+    }
+  }
+
+  const orderLine = lines.find((entry) => entry.toLowerCase().includes('order date:') && /\d/.test(entry))
+  if (orderLine) {
+    const parsed = normalizeDateCandidate(orderLine)
+    if (parsed && parsed !== orderDate) return parsed
+  }
+
+  return undefined
+}
+
 function extractShipTo(lines: string[], text: string): string {
   const shipMatch = text.match(/Ship To:\s*(Port of [^\n]+)/i)
   if (shipMatch) return shipMatch[1].trim()
@@ -273,7 +297,7 @@ function normalizeDescriptionLine(line: string): string {
 }
 
 function isDescriptionStop(line: string): boolean {
-  return /^(?:Actual Price|Mark units as:|Subtotal|MAXIMUM WEIGHT|Total$|Load:|Payment Terms:|Weight:|Printed:)/i.test(line)
+  return /^(?:Subtotal|MAXIMUM WEIGHT|Total$|Load:|Payment Terms:|Weight:|Printed:)/i.test(line)
 }
 
 function isLikelyDescriptionLine(line: string): boolean {
@@ -320,7 +344,6 @@ function collectLeadingDescription(lines: string[], itemIndex: number): string[]
     const line = lines[i]
     const normalized = normalizeDescriptionLine(line)
     if (!normalized) {
-      if (leading.length) break
       continue
     }
     if (isSectionBoundary(normalized)) break
@@ -342,7 +365,6 @@ function collectTrailingDescription(lines: string[], itemIndex: number): string[
     const line = lines[i]
     const normalized = normalizeDescriptionLine(line)
     if (!normalized) {
-      if (trailing.length) break
       continue
     }
     if (isDescriptionStop(normalized) || /^TOTAL$/i.test(normalized)) {
@@ -443,6 +465,7 @@ function extractPOData(text: string, fileName: string) {
   const vendorName = extractVendor(lines, normalizedText)
   const shipTo = extractShipTo(lines, normalizedText)
   const date = extractOrderDate(lines)
+  const expShipDate = extractExpShipDate(lines, date)
   const totalAmount = extractTotalAmount(lines, normalizedText)
   const primaryItem = extractPrimaryItem(rawLines, totalAmount)
   const freightTerm = extractFreightTerm(normalizedText)
@@ -466,6 +489,7 @@ function extractPOData(text: string, fileName: string) {
     vendorName,
     shipTo,
     date,
+    expShipDate,
     lineItems,
     totalAmount,
     notes,

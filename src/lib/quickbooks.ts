@@ -72,6 +72,7 @@ export interface IGFPurchaseOrder {
   vendorName: string
   shipTo: string
   date: string
+  expShipDate?: string
   lineItems: IGFPOLineItem[]
   totalAmount: number
   notes?: string
@@ -179,7 +180,8 @@ function buildMemo(po: IGFPurchaseOrder): string {
     `Customer PO#: ${po.customerPONumber}`,
     po.branch ? `NDC Branch: ${po.branch}` : null,
     po.freightTerm ? `Frt Term: ${po.freightTerm}` : null,
-    `Ship to: ${po.shipTo}`,
+    po.expShipDate ? `Exp Ship Date: ${po.expShipDate}` : null,
+    po.shipTo ? `Ship to: ${po.shipTo}` : null,
   ].filter(Boolean).join(' | ')
 }
 
@@ -188,7 +190,8 @@ function buildPrivateNote(po: IGFPurchaseOrder): string {
     `IGF Customer PO: ${po.customerPONumber}`,
     po.branch ? `NDC Branch: ${po.branch}` : null,
     po.freightTerm ? `Frt Term: ${po.freightTerm}` : null,
-    `Ship to: ${po.shipTo}`,
+    po.expShipDate ? `Exp Ship Date: ${po.expShipDate}` : null,
+    po.shipTo ? `Ship to: ${po.shipTo}` : null,
     po.notes ?? '',
   ].filter(Boolean).join(' | ')
 }

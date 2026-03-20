@@ -28,6 +28,7 @@ interface ParsedPO {
   vendorName: string
   shipTo: string
   date: string
+  expShipDate?: string
   lineItems: LineItem[]
   totalAmount: number
   notes?: string
@@ -197,6 +198,7 @@ export function IGFPOProcessor() {
           vendorName: order.vendorName,
           shipTo: order.shipTo,
           date: order.date,
+          expShipDate: order.expShipDate,
           lineItems: order.lineItems,
           totalAmount: order.totalAmount,
           notes: order.notes,
@@ -484,6 +486,9 @@ export function IGFPOProcessor() {
                         </p>
                         <p className="mt-2 truncate text-xs text-[var(--muted)]">{order.fileName}</p>
                         <p className="mt-1 text-xs text-[var(--muted)]">Order date {order.date}</p>
+                        {order.expShipDate && (
+                          <p className="mt-1 text-xs text-[var(--muted)]">Exp ship date {order.expShipDate}</p>
+                        )}
                       </div>
                       <div className="min-w-0">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
@@ -567,6 +572,30 @@ export function IGFPOProcessor() {
                   {expandedId === order.id && (
                     <div className="mt-5 rounded-[22px] border border-[var(--border)] bg-[rgba(255,255,255,0.72)] p-4">
                       <div className="overflow-x-auto">
+                        <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="rounded-[18px] border border-[var(--border)] bg-[var(--bg-strong)] px-4 py-3">
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">Order date</div>
+                            <div className="mt-2 text-sm font-medium text-[var(--ink)]">{order.date}</div>
+                          </div>
+                          {order.expShipDate && (
+                            <div className="rounded-[18px] border border-[var(--border)] bg-[var(--bg-strong)] px-4 py-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">Exp ship date</div>
+                              <div className="mt-2 text-sm font-medium text-[var(--ink)]">{order.expShipDate}</div>
+                            </div>
+                          )}
+                          {order.freightTerm && (
+                            <div className="rounded-[18px] border border-[var(--border)] bg-[var(--bg-strong)] px-4 py-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">Freight term</div>
+                              <div className="mt-2 text-sm font-medium text-[var(--ink)]">{order.freightTerm}</div>
+                            </div>
+                          )}
+                          {order.branch && (
+                            <div className="rounded-[18px] border border-[var(--border)] bg-[var(--bg-strong)] px-4 py-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">Branch</div>
+                              <div className="mt-2 text-sm font-medium text-[var(--ink)]">{order.branch}</div>
+                            </div>
+                          )}
+                        </div>
                         <table className="w-full min-w-[720px] text-sm">
                           <thead>
                             <tr className="border-b border-[var(--border)] text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
