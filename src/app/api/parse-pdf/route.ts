@@ -594,6 +594,7 @@ function extractPOData(text: string, fileName: string) {
       quantity: 1,
       unitPrice: totalAmount,
       amount: totalAmount,
+      priceUom: undefined,
     })
   }
 
