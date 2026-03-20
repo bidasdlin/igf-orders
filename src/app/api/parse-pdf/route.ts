@@ -325,6 +325,12 @@ function isLikelyDescriptionLine(line: string): boolean {
 }
 
 function extractItemCodeCandidate(line: string): string | null {
+  const compact = normalizeCompactItemLine(line)
+  const mergedPriceMatch = compact.match(/([A-Z]{2,6}[A-Z0-9]{2,12}?)(?=\d{2,4}(?:\.\d{2})?(?:N\d{2,4}(?:\.\d{2})?)?(?:\/|N)[A-Z]{2,10})/i)?.[1]
+  if (mergedPriceMatch) {
+    return mergedPriceMatch.replace(/^(?:UNIT)+/i, '')
+  }
+
   const candidates = cleanLine(line).match(/\b[A-Z0-9]{6,16}\b/g) ?? []
   for (const candidate of candidates) {
     if (!/^[A-Z]/.test(candidate)) continue
@@ -351,8 +357,16 @@ function normalizeRepeatedDigits(value: string): string {
   return compact
 }
 
+function normalizeCompactItemLine(line: string): string {
+  return line
+    .replace(/\s+/g, '')
+    .replace(/U\/IT/gi, 'UNIT')
+    .replace(/(\d+(?:\.\d+)?)N\1N([A-Z]{2,10})/gi, '$1/$2')
+    .replace(/(\d+(?:\.\d+)?)N([A-Z]{2,10})/gi, '$1/$2')
+}
+
 function extractQuantityFromItemLine(line: string): number {
-  const compact = line.replace(/\s+/g, '')
+  const compact = normalizeCompactItemLine(line)
   const leading = compact.match(/^(\d+)(?:UNIT|U\/IT)/i)?.[1]
   if (leading) {
     const quantity = Number(normalizeRepeatedDigits(leading))
@@ -369,7 +383,7 @@ function extractQuantityFromItemLine(line: string): number {
 }
 
 function extractPriceUom(line: string): string | undefined {
-  const compact = line.replace(/\s+/g, '').replace(/U\/IT/gi, 'UNIT')
+  const compact = normalizeCompactItemLine(line)
   const matches = Array.from(compact.matchAll(/(\d+(?:\.\d+)?\/[A-Z]{2,10})/g)).map((match) => match[1])
   return matches.reverse().find((value) => !/\/UNIT$/i.test(value))
 }
