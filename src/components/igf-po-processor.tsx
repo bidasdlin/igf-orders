@@ -19,6 +19,7 @@ interface LineItem {
   quantity: number
   unitPrice: number
   amount: number
+  priceUom?: string
 }
 
 interface ParsedPO {
@@ -206,7 +207,16 @@ export function IGFPOProcessor() {
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const data = await res.json()
       if (!data.success) throw new Error(data.error || 'Parse failed')
-      const po: ParsedPO = { ...data.po, id: tempId, fileName: file.name, status: 'parsed' }
+      const hasIncompleteDetails = data.po.lineItems?.some((item: LineItem) =>
+        item.description.startsWith('Unable to recover full line item details'),
+      )
+      const po: ParsedPO = {
+        ...data.po,
+        id: tempId,
+        fileName: file.name,
+        status: hasIncompleteDetails ? 'error' : 'parsed',
+        error: hasIncompleteDetails ? 'Full line item details could not be recovered from the source PDF.' : undefined,
+      }
       setOrders((prev) => {
         const index = prev.findIndex((item) => item.poNumber === po.poNumber)
         if (index >= 0) {

@@ -7,6 +7,7 @@ interface DirectLineItemInput {
   qty?: number
   unitPrice?: number
   amount: number
+  priceUom?: string
 }
 
 interface DirectPOInput {
@@ -27,6 +28,7 @@ interface RenderedLineItem {
   itemCode: string
   description: string
   amount: number
+  priceUom?: string
 }
 
 interface RenderedPO {
@@ -66,22 +68,26 @@ function sanitize(s: string): string {
   // Replace anything else (e.g. U+1100 Hangul, etc.) with '?'
   return s.replace(/[^\x0A\x0D\x20-\x7E\u00A0-\u00FF\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u20AC]/g, '?')}
 
-function parseQBDescription(desc: string): { qty: number; itemCode: string; description: string } {
+function parseQBDescription(desc: string): { qty: number; itemCode: string; description: string; priceUom?: string } {
   const normalized = sanitize(desc).trim()
-  const match = normalized.match(/^(\d+(?:\.\d+)?)\s+Units?\s+([A-Z0-9]+)\s*(?:—|-)?\s*([\s\S]*)$/)
+  const priceUom = normalized.match(/(?:^|\n)Price\/UOM:\s*([^\n]+)/i)?.[1]?.trim()
+  const withoutPriceUom = normalized.replace(/\n?Price\/UOM:\s*[^\n]+/ig, '').trim()
+  const match = withoutPriceUom.match(/^(\d+(?:\.\d+)?)\s+Units?\s+([A-Z0-9]+)\s*(?:—|-)?\s*([\s\S]*)$/)
   if (match) {
     return {
       qty: parseInt(match[1], 10) || 0,
       itemCode: match[2] ?? '',
       description: match[3]?.trim() ?? '',
+      priceUom,
     }
   }
 
-  const parts = normalized.split(/\s+/)
+  const parts = withoutPriceUom.split(/\s+/)
   return {
     qty: parseInt(parts[0] ?? '0', 10) || 0,
     itemCode: parts[2] ?? '',
-    description: '',
+    description: withoutPriceUom,
+    priceUom,
   }
 }
 
@@ -208,6 +214,7 @@ function toRenderedLineItem(item: DirectLineItemInput): RenderedLineItem {
     itemCode: parsed.itemCode,
     description: parsed.description || sanitize(item.description ?? ''),
     amount: Number(item.amount ?? 0),
+    priceUom: sanitize(item.priceUom ?? parsed.priceUom ?? '').trim() || undefined,
   }
 }
 
@@ -360,7 +367,7 @@ async function renderPurchaseOrderPdf(data: RenderedPO) {
   const tDesc = M, tQty = M + 258, tRate = M + 328, tAmt = M + 398, tLoad = M + 472
 
   page.drawText(sanitize('QTY'), { x: tQty, y: y + 2, font: fontB, size: 8, color: black })
-  page.drawText(sanitize('RATE'), { x: tRate, y: y + 2, font: fontB, size: 8, color: black })
+  page.drawText(sanitize('PRICE/UOM'), { x: tRate, y: y + 2, font: fontB, size: 8, color: black })
   page.drawText(sanitize('AMOUNT'), { x: tAmt, y: y + 2, font: fontB, size: 8, color: black })
   page.drawText(sanitize('LOADING'), { x: tLoad, y: y + 2, font: fontB, size: 8, color: black })
 
@@ -369,9 +376,10 @@ async function renderPurchaseOrderPdf(data: RenderedPO) {
   const descMaxW = 248
   for (const item of items) {
     const rate = item.qty > 0 ? item.amount / item.qty : 0
+    const priceUom = item.priceUom || rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     page.drawText(sanitize(item.itemCode), { x: tDesc, y, font: fontB, size: 9, color: black })
     page.drawText(sanitize(`${item.qty.toFixed(2)}/Unit`), { x: tQty, y, font: fontR, size: 9, color: black })
-    page.drawText(rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    page.drawText(sanitize(priceUom),
       { x: tRate, y, font: fontR, size: 9, color: black }
     )
     page.drawText(item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),

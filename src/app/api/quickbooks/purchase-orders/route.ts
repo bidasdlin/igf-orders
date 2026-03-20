@@ -33,6 +33,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (body.lineItems.some((item) => item.description.startsWith('Unable to recover full line item details'))) {
+      return NextResponse.json(
+        { success: false, error: 'Full line item details were not recovered from the original PDF. Review this PO before syncing.' },
+        { status: 422 }
+      )
+    }
+
     const computedTotal = body.lineItems.reduce((sum, item) => sum + item.amount, 0)
     if (Math.abs(computedTotal - body.totalAmount) > 0.01) {
       return NextResponse.json(

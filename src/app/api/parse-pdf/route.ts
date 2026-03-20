@@ -281,7 +281,13 @@ function dedupeLines(lines: string[]): string[] {
   return normalized
 }
 
-function buildParsedItem(quantity: number, itemCode: string, totalAmount: number, descriptionLines: string[]) {
+function buildParsedItem(
+  quantity: number,
+  itemCode: string,
+  totalAmount: number,
+  descriptionLines: string[],
+  priceUom?: string,
+) {
   const descriptionBody = dedupeLines(descriptionLines).join('\n').trim()
   if (!descriptionBody) return null
 
@@ -290,6 +296,7 @@ function buildParsedItem(quantity: number, itemCode: string, totalAmount: number
     quantity,
     unitPrice: quantity > 0 ? Number((totalAmount / quantity).toFixed(2)) : totalAmount,
     amount: totalAmount,
+    priceUom,
   }
 }
 
@@ -315,6 +322,22 @@ function isLikelyDescriptionLine(line: string): boolean {
   if (!/[A-Za-z]/.test(normalized)) return false
   if (/^[\d\s,.$/%:-]+$/.test(normalized)) return false
   return true
+}
+
+function extractItemCodeCandidate(line: string): string | null {
+  const candidates = cleanLine(line).match(/\b[A-Z0-9]{6,16}\b/g) ?? []
+  for (const candidate of candidates) {
+    if (!/^[A-Z]/.test(candidate)) continue
+    if (!/[A-Z]/.test(candidate) || !/\d/.test(candidate)) continue
+    if ((candidate.match(/[A-Z]/g) ?? []).length < 2) continue
+    if ((candidate.match(/\d/g) ?? []).length < 2) continue
+    if (/^(?:ACCOUNT|AMOUNT|BRANCH|BUYER|CONFIRMED|ORDER|PAGE|PHONE|PORTLAND|PRINTED|QUANTITY|REFERENCE|SHIP|SUBTOTAL|SUPPLIER|TOTAL|UNIT|VENDOR|VERBAL|WEIGHT)$/i.test(candidate)) {
+      continue
+    }
+    return candidate
+  }
+
+  return null
 }
 
 function normalizeRepeatedDigits(value: string): string {
@@ -343,6 +366,12 @@ function extractQuantityFromItemLine(line: string): number {
   }
 
   return 0
+}
+
+function extractPriceUom(line: string): string | undefined {
+  const compact = line.replace(/\s+/g, '').replace(/U\/IT/gi, 'UNIT')
+  const matches = Array.from(compact.matchAll(/(\d+(?:\.\d+)?\/[A-Z]{2,10})/g)).map((match) => match[1])
+  return matches.reverse().find((value) => !/\/UNIT$/i.test(value))
 }
 
 function collectLeadingDescription(lines: string[], itemIndex: number): string[] {
@@ -407,22 +436,27 @@ function extractTotalAmount(lines: string[], text: string): number {
 function extractPrimaryItem(lines: string[], totalAmount: number) {
   const inlineItemIndex = lines.findIndex((line) => {
     const compact = line.replace(/\s+/g, '')
-    return /(?:UNIT|U\/IT)/i.test(compact) && /[A-Z]{2,4}\d{3,4}[A-Z]{1,4}(?=\d|[\s/]|$)/i.test(line)
+    return /(?:UNIT|U\/IT)/i.test(compact) && Boolean(extractItemCodeCandidate(line))
   })
   if (inlineItemIndex >= 0) {
     const line = lines[inlineItemIndex]
     const quantity = extractQuantityFromItemLine(line)
-    const itemCode = line.match(/([A-Z]{2,4}\d{3,4}[A-Z]{1,4})(?=\d|[\s/]|$)/i)?.[1]
+    const itemCode = extractItemCodeCandidate(line)
     if (quantity && itemCode) {
       const descriptionLines = [
         ...collectLeadingDescription(lines, inlineItemIndex),
         ...collectTrailingDescription(lines, inlineItemIndex),
       ]
-      return buildParsedItem(quantity, itemCode, totalAmount, descriptionLines)
+      const priceUom = extractPriceUom(line) ?? extractPriceUom(lines[inlineItemIndex + 1] ?? '')
+      return buildParsedItem(quantity, itemCode, totalAmount, descriptionLines, priceUom)
     }
   }
 
-  const itemIndex = lines.findIndex((line) => /^(?!TOTAL$)[A-Z]{2,4}\d{3,4}[A-Z0-9]{1,4}$/i.test(cleanLine(line)))
+  const itemIndex = lines.findIndex((line) => {
+    const cleaned = cleanLine(line)
+    const itemCode = extractItemCodeCandidate(cleaned)
+    return itemCode !== null && itemCode === cleaned
+  })
   if (itemIndex < 0) return null
 
   const itemCode = cleanLine(lines[itemIndex])
@@ -434,7 +468,60 @@ function extractPrimaryItem(lines: string[], totalAmount: number) {
     ...collectTrailingDescription(lines, itemIndex),
   ]
 
-  return buildParsedItem(quantity, itemCode, totalAmount, descriptionLines)
+  const priceUom = lines
+    .slice(Math.max(0, itemIndex - 1), Math.min(lines.length, itemIndex + 2))
+    .map(extractPriceUom)
+    .find(Boolean)
+
+  return buildParsedItem(quantity, itemCode, totalAmount, descriptionLines, priceUom)
+}
+
+function extractRawTableItem(lines: string[], totalAmount: number) {
+  const headerIndex = lines.findIndex((line) => /ITEM.?DESCRIPTION/i.test(line))
+  if (headerIndex < 0) return null
+
+  const sectionLines: string[] = []
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    const line = lines[i]
+    const normalized = cleanLine(line)
+    if (!normalized) continue
+    if (isDescriptionStop(normalized) || /^TOTAL$/i.test(normalized) || /^Subtotal/i.test(normalized)) {
+      break
+    }
+    sectionLines.push(line)
+  }
+
+  if (sectionLines.length === 0) return null
+
+  const itemLine = sectionLines.find((line) => extractItemCodeCandidate(line) && extractQuantityFromItemLine(line))
+    ?? sectionLines.find((line) => extractItemCodeCandidate(line))
+    ?? ''
+
+  const itemCode = extractItemCodeCandidate(itemLine) ?? ''
+  const quantity = extractQuantityFromItemLine(itemLine) || 1
+  const priceUom = sectionLines.map(extractPriceUom).find(Boolean)
+
+  const descriptionLines = sectionLines
+    .map((line) => normalizeDescriptionLine(line))
+    .filter(Boolean)
+    .filter((line) => {
+      if (line === normalizeDescriptionLine(itemLine)) return false
+      if (/^[\d\s,.$/%:-]+$/.test(line)) return false
+      return !isDescriptionStop(line)
+    })
+
+  if (descriptionLines.length === 0) return null
+
+  const descriptionBody = dedupeLines(descriptionLines).join('\n').trim()
+  if (!descriptionBody) return null
+
+  return {
+    description: itemCode ? `${quantity} Units ${itemCode} — ${descriptionBody}` : descriptionBody,
+    quantity,
+    unitPrice: quantity > 0 ? Number((totalAmount / quantity).toFixed(2)) : totalAmount,
+    amount: totalAmount,
+    priceUom,
+  }
 }
 
 function extractNotes(lines: string[], text: string): string {
@@ -476,16 +563,34 @@ function extractPOData(text: string, fileName: string) {
   const expShipDate = extractExpShipDate(lines, date)
   const totalAmount = extractTotalAmount(lines, normalizedText)
   const primaryItem = extractPrimaryItem(rawLines, totalAmount)
+  const rawTableItem = extractRawTableItem(rawLines, totalAmount)
   const freightTerm = extractFreightTerm(normalizedText)
   const branch = extractBranch(normalizedText, poNumber, freightTerm)
   const notes = extractNotes(rawLines, normalizedText)
 
-  const lineItems = primaryItem ? [primaryItem] : []
+  const mergedItem = (() => {
+    if (primaryItem && rawTableItem) {
+      return {
+        ...primaryItem,
+        description: rawTableItem.description.length > primaryItem.description.length
+          ? rawTableItem.description
+          : primaryItem.description,
+        quantity: primaryItem.quantity || rawTableItem.quantity,
+        unitPrice: primaryItem.unitPrice || rawTableItem.unitPrice,
+        amount: primaryItem.amount || rawTableItem.amount,
+        priceUom: rawTableItem.priceUom || primaryItem.priceUom,
+      }
+    }
 
-  // Fallback if no items found
+    return primaryItem ?? rawTableItem ?? null
+  })()
+
+  const lineItems = mergedItem ? [mergedItem] : []
+
+  // Final fallback if no item details could be recovered from the source table.
   if (lineItems.length === 0 && totalAmount > 0) {
     lineItems.push({
-      description: 'Refer to attached PO for line item details',
+      description: 'Unable to recover full line item details from the source PDF',
       quantity: 1,
       unitPrice: totalAmount,
       amount: totalAmount,

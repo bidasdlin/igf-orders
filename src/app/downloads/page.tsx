@@ -25,6 +25,7 @@ interface SyncedPO {
       qty?: number
       unitPrice?: number
       amount: number
+      priceUom?: string
     }>
     totalAmount: number
     notes?: string

@@ -64,6 +64,7 @@ export interface IGFPOLineItem {
   qty?: number
   unitPrice: number
   amount: number
+  priceUom?: string
 }
 
 export interface IGFPurchaseOrder {
@@ -159,7 +160,10 @@ function buildLines(po: IGFPurchaseOrder, cogsAccount: { value: string; name: st
   return po.lineItems.map((item, index) => ({
     DetailType: 'AccountBasedExpenseLineDetail',
     Amount: item.amount,
-    Description: item.description,
+    Description: [
+      item.description.trim(),
+      item.priceUom ? `Price/UOM: ${item.priceUom}` : null,
+    ].filter(Boolean).join('\n'),
     AccountBasedExpenseLineDetail: {
       AccountRef: cogsAccount,
       BillableStatus: 'NotBillable',
