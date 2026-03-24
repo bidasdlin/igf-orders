@@ -328,7 +328,7 @@ function isLikelyDescriptionLine(line: string): boolean {
 function isArtifactLine(line: string): boolean {
   const compact = normalizeDescriptionLine(line).replace(/[^A-Za-z0-9]/g, '').toUpperCase()
   if (/^\d{7,10}$/.test(compact)) return true
-  return /^(?:PURCHASEORDER|POBOX|EUGENEOR|PHONE|FAX|ACCOUNT|BRANCH|SHIPTO|SUPPLIER|MFG|VERBALPO|ORDERDATE|EXPSHIPDATE|REFERENCE|WH|TYPE|PAGE\d+OF\d+|NDC|HIGHCUBECY|DDP[A-Z]*)/.test(compact)
+  return /^(?:NORTHANNDISTRIBUTION(?:CENTER|CTR)INC|FINANCIALNORTHANNCOM|WWWNORTHANNCOM|PURCHASEORDER|POBOX|EUGENEOR|PHONE|FAX|ACCOUNT|BRANCH|SHIPTO|SUPPLIER|MFG|VERBALPO|ORDERDATE|EXPSHIPDATE|REFERENCE|WH|TYPE|PAGE\d+OF\d+|NDC|HIGHCUBECY|DDP[A-Z]*)/.test(compact)
 }
 
 function extractItemCodeCandidate(line: string): string | null {
@@ -362,6 +362,25 @@ function normalizeRepeatedDigits(value: string): string {
     }
   }
   return compact
+}
+
+function normalizeRepeatedMoney(value: string): string {
+  const compact = value.replace(/\s+/g, '')
+  const match = compact.match(/^([\d,]+)(\.\d{2})$/)
+  if (!match) return compact
+
+  const digits = match[1].replace(/,/g, '')
+  if (digits.length % 2 !== 0) return compact
+
+  const half = digits.length / 2
+  if (digits.slice(0, half) !== digits.slice(half)) return compact
+
+  const deduped = digits.slice(0, half)
+  const formatted = match[1].includes(',')
+    ? deduped.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+    : deduped
+
+  return `${formatted}${match[2]}`
 }
 
 function normalizeCompactItemLine(line: string): string {
@@ -398,9 +417,9 @@ function extractPriceUom(line: string): string | undefined {
 function extractAmountFromItemLine(line: string): number {
   const compact = normalizeCompactItemLine(line)
   const beforeTrailingQty = compact.match(/(\d[\d,]*\.\d{2})(?=UNIT\d+\.00(?:\/|N))/i)?.[1]
-  if (beforeTrailingQty) return parseMoney(beforeTrailingQty)
+  if (beforeTrailingQty) return parseMoney(normalizeRepeatedMoney(beforeTrailingQty))
 
-  const amounts = Array.from(compact.matchAll(/(\d[\d,]*\.\d{2})/g)).map((match) => parseMoney(match[1]))
+  const amounts = Array.from(compact.matchAll(/(\d[\d,]*\.\d{2})/g)).map((match) => parseMoney(normalizeRepeatedMoney(match[1])))
   return amounts.length > 0 ? amounts[amounts.length - 1] : 0
 }
 
@@ -659,11 +678,11 @@ function extractNotes(lines: string[], text: string): string {
   if (startIndex >= 0) {
     const noteLines: string[] = []
     for (let i = startIndex; i < lines.length; i++) {
-    const normalized = cleanLine(lines[i])
-    if (!normalized) {
-      if (noteLines.length) break
-      continue
-    }
+      const normalized = cleanLine(lines[i])
+      if (!normalized) {
+        if (noteLines.length) break
+        continue
+      }
       if (isArtifactLine(normalized)) {
         continue
       }
@@ -673,7 +692,7 @@ function extractNotes(lines: string[], text: string): string {
       if (noteLines.length && isValueNoise(normalized)) {
         continue
       }
-      if (/^(Payment Terms:|Weight:|Printed:|Total$|Load:)/i.test(normalized)) break
+      if (/^(Payment Terms:|Weight:|Total$|Load:)/i.test(normalized)) break
       if (/^(MAXIMUM WEIGHT|IF SHIPMENT AS|ORDERED WILL BE ABOVE|PLEASE CONTACT|CONTACT US|US REGARDING)/i.test(normalized)) {
         noteLines.push(normalized)
       }
