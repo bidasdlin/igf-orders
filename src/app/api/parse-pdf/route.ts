@@ -692,7 +692,6 @@ function extractNotes(lines: string[], text: string): string {
       if (noteLines.length && isValueNoise(normalized)) {
         continue
       }
-      if (/^(Payment Terms:|Weight:|Total$|Load:)/i.test(normalized)) break
       if (/^(MAXIMUM WEIGHT|IF SHIPMENT AS|ORDERED WILL BE ABOVE|PLEASE CONTACT|CONTACT US|US REGARDING)/i.test(normalized)) {
         noteLines.push(normalized)
       }
