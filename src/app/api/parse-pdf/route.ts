@@ -318,15 +318,22 @@ function isDescriptionStop(line: string): boolean {
 function isLikelyDescriptionLine(line: string): boolean {
   const normalized = normalizeDescriptionLine(line)
   if (!normalized) return false
+  if (isArtifactLine(normalized)) return false
   if (isSectionBoundary(normalized) || isDescriptionStop(normalized)) return false
   if (!/[A-Za-z]/.test(normalized)) return false
   if (/^[\d\s,.$/%:-]+$/.test(normalized)) return false
   return true
 }
 
+function isArtifactLine(line: string): boolean {
+  const compact = normalizeDescriptionLine(line).replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+  if (/^\d{7,10}$/.test(compact)) return true
+  return /^(?:PURCHASEORDER|POBOX|EUGENEOR|PHONE|FAX|ACCOUNT|BRANCH|SHIPTO|SUPPLIER|MFG|VERBALPO|ORDERDATE|EXPSHIPDATE|REFERENCE|WH|TYPE|PAGE\d+OF\d+|NDC|HIGHCUBECY|DDP[A-Z]*)/.test(compact)
+}
+
 function extractItemCodeCandidate(line: string): string | null {
   const compact = normalizeCompactItemLine(line)
-  const mergedPriceMatch = compact.match(/([A-Z]{2,6}[A-Z0-9]{2,12}?)(?=\d{2,4}(?:\.\d{2})?(?:N\d{2,4}(?:\.\d{2})?)?(?:\/|N)[A-Z]{2,10})/i)?.[1]
+  const mergedPriceMatch = compact.match(/([A-Z]{2,6}[A-Z0-9]{2,12}?)(?=\d[\d,]*(?:\.\d{2})?(?:N\d[\d,]*(?:\.\d{2})?)?(?:\/|N)[A-Z]{2,10})/i)?.[1]
   if (mergedPriceMatch) {
     return mergedPriceMatch.replace(/^(?:UNIT)+/i, '')
   }
@@ -361,8 +368,8 @@ function normalizeCompactItemLine(line: string): string {
   return line
     .replace(/\s+/g, '')
     .replace(/U\/IT/gi, 'UNIT')
-    .replace(/(\d+(?:\.\d+)?)N\1N([A-Z]{2,10})/gi, '$1/$2')
-    .replace(/(\d+(?:\.\d+)?)N([A-Z]{2,10})/gi, '$1/$2')
+    .replace(/(\d[\d,]*(?:\.\d+)?)N\1N([A-Z]{2,10})/gi, '$1/$2')
+    .replace(/(\d[\d,]*(?:\.\d+)?)N([A-Z]{2,10})/gi, '$1/$2')
 }
 
 function extractQuantityFromItemLine(line: string): number {
@@ -384,8 +391,117 @@ function extractQuantityFromItemLine(line: string): number {
 
 function extractPriceUom(line: string): string | undefined {
   const compact = normalizeCompactItemLine(line)
-  const matches = Array.from(compact.matchAll(/(\d+(?:\.\d+)?\/[A-Z]{2,10})/g)).map((match) => match[1])
+  const matches = Array.from(compact.matchAll(/(\d[\d,]*(?:\.\d+)?\/[A-Z]{2,10})/g)).map((match) => match[1])
   return matches.reverse().find((value) => !/\/UNIT$/i.test(value))
+}
+
+function extractAmountFromItemLine(line: string): number {
+  const compact = normalizeCompactItemLine(line)
+  const beforeTrailingQty = compact.match(/(\d[\d,]*\.\d{2})(?=UNIT\d+\.00(?:\/|N))/i)?.[1]
+  if (beforeTrailingQty) return parseMoney(beforeTrailingQty)
+
+  const amounts = Array.from(compact.matchAll(/(\d[\d,]*\.\d{2})/g)).map((match) => parseMoney(match[1]))
+  return amounts.length > 0 ? amounts[amounts.length - 1] : 0
+}
+
+function isPotentialItemLine(line: string): boolean {
+  return extractQuantityFromItemLine(line) > 0 && Boolean(extractItemCodeCandidate(line))
+}
+
+function extractLineItems(lines: string[], totalAmount: number) {
+  const headerIndex = lines.findIndex((line) => /ITEM.?DESCRIPTION/i.test(line))
+  if (headerIndex < 0) return []
+
+  const items: Array<{
+    quantity: number
+    itemCode: string
+    amount: number
+    priceUom?: string
+    descriptionLines: string[]
+  }> = []
+  let pendingDescription: string[] = []
+  let current: {
+    quantity: number
+    itemCode: string
+    amount: number
+    priceUom?: string
+    descriptionLines: string[]
+  } | null = null
+
+  const flushCurrent = () => {
+    if (!current) return
+    const descriptionBody = dedupeLines(current.descriptionLines).join('\n').trim()
+    if (descriptionBody) {
+      items.push({
+        ...current,
+        descriptionLines: dedupeLines(current.descriptionLines),
+      })
+    }
+    current = null
+  }
+
+  for (let i = headerIndex + 1; i < lines.length; i++) {
+    const line = lines[i]
+    const normalized = normalizeDescriptionLine(line)
+    if (!normalized) continue
+
+    if (/^Subtotal/i.test(normalized)) {
+      flushCurrent()
+      break
+    }
+
+    if (isSectionBoundary(normalized)) {
+      if (current && /^(?:Printed:|Page \d+ of \d+|PURCHASE ORDER|PO Box|Supplier:)/i.test(normalized)) {
+        flushCurrent()
+      }
+      continue
+    }
+
+    if (isDescriptionStop(normalized) || /^TOTAL$/i.test(normalized)) {
+      flushCurrent()
+      break
+    }
+
+    if (isPotentialItemLine(line)) {
+      flushCurrent()
+      current = {
+        quantity: extractQuantityFromItemLine(line) || 1,
+        itemCode: extractItemCodeCandidate(line) ?? '',
+        amount: extractAmountFromItemLine(line),
+        priceUom: extractPriceUom(line),
+        descriptionLines: pendingDescription,
+      }
+      pendingDescription = []
+      continue
+    }
+
+    if (normalized === '-') {
+      continue
+    }
+
+    if (!isLikelyDescriptionLine(line)) {
+      continue
+    }
+
+    if (current) {
+      current.descriptionLines.push(normalized)
+    } else if (items.length === 0) {
+      pendingDescription.push(normalized)
+    }
+  }
+
+  flushCurrent()
+
+  return items.map((item, index, all) => {
+    const amount = item.amount || (all.length === 1 ? totalAmount : 0)
+    return {
+      description: `${item.quantity} Units ${item.itemCode} — ${item.descriptionLines.join('\n')}`,
+      quantity: item.quantity,
+      unitPrice: item.quantity > 0 ? Number((amount / item.quantity).toFixed(2)) : amount,
+      amount,
+      priceUom: item.priceUom,
+    }
+  }).filter((item) => item.amount > 0)
 }
 
 function collectLeadingDescription(lines: string[], itemIndex: number): string[] {
@@ -543,13 +659,24 @@ function extractNotes(lines: string[], text: string): string {
   if (startIndex >= 0) {
     const noteLines: string[] = []
     for (let i = startIndex; i < lines.length; i++) {
-      const normalized = cleanLine(lines[i])
-      if (!normalized) {
-        if (noteLines.length) break
+    const normalized = cleanLine(lines[i])
+    if (!normalized) {
+      if (noteLines.length) break
+      continue
+    }
+      if (isArtifactLine(normalized)) {
+        continue
+      }
+      if (isSectionBoundary(normalized)) {
+        continue
+      }
+      if (noteLines.length && isValueNoise(normalized)) {
         continue
       }
       if (/^(Payment Terms:|Weight:|Printed:|Total$|Load:)/i.test(normalized)) break
-      noteLines.push(normalized)
+      if (/^(MAXIMUM WEIGHT|IF SHIPMENT AS|ORDERED WILL BE ABOVE|PLEASE CONTACT|CONTACT US|US REGARDING)/i.test(normalized)) {
+        noteLines.push(normalized)
+      }
     }
     return noteLines.join(' ')
   }
@@ -576,6 +703,7 @@ function extractPOData(text: string, fileName: string) {
   const date = extractOrderDate(lines)
   const expShipDate = extractExpShipDate(lines, date)
   const totalAmount = extractTotalAmount(lines, normalizedText)
+  const multiLineItems = extractLineItems(rawLines, totalAmount)
   const primaryItem = extractPrimaryItem(rawLines, totalAmount)
   const rawTableItem = extractRawTableItem(rawLines, totalAmount)
   const freightTerm = extractFreightTerm(normalizedText)
@@ -599,7 +727,7 @@ function extractPOData(text: string, fileName: string) {
     return primaryItem ?? rawTableItem ?? null
   })()
 
-  const lineItems = mergedItem ? [mergedItem] : []
+  const lineItems = multiLineItems.length > 0 ? multiLineItems : (mergedItem ? [mergedItem] : [])
 
   // Final fallback if no item details could be recovered from the source table.
   if (lineItems.length === 0 && totalAmount > 0) {
