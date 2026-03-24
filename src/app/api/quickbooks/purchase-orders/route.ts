@@ -41,7 +41,9 @@ export async function POST(request: NextRequest) {
     }
 
     const computedTotal = body.lineItems.reduce((sum, item) => sum + item.amount, 0)
-    if (Math.abs(computedTotal - body.totalAmount) > 0.01) {
+    const computedTotalCents = Math.round(computedTotal * 100)
+    const totalAmountCents = Math.round(body.totalAmount * 100)
+    if (Math.abs(computedTotalCents - totalAmountCents) > 1) {
       return NextResponse.json(
         { success: false, error: `Total mismatch: line items sum to ${computedTotal.toFixed(2)}, but totalAmount is ${body.totalAmount}` },
         { status: 400 }

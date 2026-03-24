@@ -253,6 +253,7 @@ function buildRenderedPOFromQB(qbPO: Record<string, unknown>, fallbackDocNumber:
       itemCode: parsed.itemCode,
       description: parsed.description,
       amount: line.Amount ?? 0,
+      priceUom: parsed.priceUom,
     }
   })
 

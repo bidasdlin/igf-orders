@@ -12,6 +12,7 @@ const REFRESH_TOKEN = process.env.QBO_REFRESH_TOKEN!
 let cachedAccessToken: string | null = null
 let tokenExpiry: number = 0
 let cachedCogsAccount: { value: string; name: string } | null = null
+let currentRefreshToken: string = REFRESH_TOKEN
 
 async function getAccessToken(): Promise<string> {
   if (cachedAccessToken && Date.now() < tokenExpiry) {
@@ -25,7 +26,7 @@ async function getAccessToken(): Promise<string> {
       'Content-Type': 'application/x-www-form-urlencoded',
       'Accept': 'application/json',
     },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: REFRESH_TOKEN }),
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: currentRefreshToken }),
   })
   if (!response.ok) {
     const error = await response.text()
@@ -34,6 +35,9 @@ async function getAccessToken(): Promise<string> {
   const data = await response.json()
   cachedAccessToken = data.access_token
   tokenExpiry = Date.now() + (data.expires_in - 60) * 1000
+  if (typeof data.refresh_token === 'string' && data.refresh_token.length > 0) {
+    currentRefreshToken = data.refresh_token
+  }
   return cachedAccessToken!
 }
 
