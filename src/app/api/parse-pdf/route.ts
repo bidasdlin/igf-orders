@@ -40,7 +40,7 @@ function scrubPdfArtifacts(value: string): string {
     .replace(/\u0000/g, '')
     .replace(/\u1100/g, '2')
     .replace(/\(ᄀ\)/g, '2')
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/gu, (char) => (/[\p{L}\p{N}]/u.test(char) ? char : ' '))
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
 }
 
 function toIsoDate(value: string): string {
