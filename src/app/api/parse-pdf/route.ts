@@ -35,6 +35,14 @@ function decodeWideChars(text: string): string {
   }).replace(/\(ᄀ\)/g, '2')
 }
 
+function scrubPdfArtifacts(value: string): string {
+  return value
+    .replace(/\u0000/g, '')
+    .replace(/\u1100/g, '2')
+    .replace(/\(ᄀ\)/g, '2')
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/gu, (char) => (/[\p{L}\p{N}]/u.test(char) ? char : ' '))
+}
+
 function toIsoDate(value: string): string {
   const parts = value.split('/')
   if (parts.length !== 3) return new Date().toISOString().split('T')[0]
@@ -43,22 +51,16 @@ function toIsoDate(value: string): string {
 }
 
 function cleanLine(line: string): string {
-  return line
-    .replace(/\u0000/g, '')
+  return scrubPdfArtifacts(line)
     .replace(/\f/g, '')
-    .replace(/\u1100/g, '2')
-    .replace(/\(ᄀ\)/g, '2')
     .replace(/\s+/g, ' ')
     .trim()
 }
 
 function normalizePdfText(text: string): string {
-  return text
+  return scrubPdfArtifacts(text)
     .replace(/\r/g, '')
-    .replace(/\u0000/g, '')
     .replace(/\f/g, '\n')
-    .replace(/\u1100/g, '2')
-    .replace(/\(ᄀ\)/g, '2')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
@@ -135,8 +137,29 @@ function normalizeDateCandidate(value: string): string | null {
 }
 
 function extractVendor(lines: string[], text: string): string {
-  const mfgLine = lines.find((line) => /^mfg\s+/i.test(line))
-  if (mfgLine) return mfgLine.replace(/^mfg\s+/i, '').trim()
+  const mfgLine = lines.find((line) => /^(?:mfg|mgf)\s+/i.test(line))
+  if (mfgLine) return mfgLine.replace(/^(?:mfg|mgf)\s+/i, '').trim()
+
+  const supplierIndex = lines.findIndex((line) => /^Supplier:/i.test(line))
+  if (supplierIndex >= 0) {
+    const supplierBlock = lines
+      .slice(supplierIndex, Math.min(lines.length, supplierIndex + 8))
+      .map((line, index) => index === 0 ? line.replace(/^Supplier:\s*/i, '').trim() : line.trim())
+      .filter(Boolean)
+      .filter((line) => !/^(?:Reprinted:|Page \d+ of \d+|Ship To:|Reference:|Order Date:|Exp Ship Date:|Type:|Buyer:|Buyer 2:|Confirmed:|W H|Phone:|Fax:|Account:|Branch:)/i.test(line))
+
+    const supplierManufacturer = supplierBlock.find((line) => /^(?:mfg|mgf)\s+/i.test(line))
+    if (supplierManufacturer) {
+      return supplierManufacturer.replace(/^(?:mfg|mgf)\s+/i, '').trim()
+    }
+
+    const supplierCandidate = supplierBlock.find((line) => (
+      line &&
+      !/^Northann Distribution (?:Ctr|Center) Inc\.?$/i.test(line) &&
+      !/^Supplier:$/i.test(line)
+    ))
+    if (supplierCandidate) return supplierCandidate
+  }
 
   const vendorIndex = lines.findIndex((line) => line.toUpperCase() === 'VENDOR')
   if (vendorIndex >= 0) {
@@ -144,8 +167,13 @@ function extractVendor(lines: string[], text: string): string {
     if (vendor) return vendor
   }
 
-  const supplierMatch = text.match(/Supplier:\s*([^\n]+)/i)
-  return supplierMatch?.[1]?.trim() || 'Unknown Vendor'
+  const supplierMatch = text.match(/Supplier:\s*([^\n]+)/i)?.[1]?.trim()
+  if (supplierMatch && !/^Northann Distribution (?:Ctr|Center) Inc\.?$/i.test(supplierMatch)) {
+    return supplierMatch
+  }
+
+  const manufacturerMatch = text.match(/(?:^|\n)\s*(?:mfg|mgf)\s+([^\n]+)/i)?.[1]?.trim()
+  return manufacturerMatch || 'Unknown Vendor'
 }
 
 function extractOrderDate(lines: string[]): string {
