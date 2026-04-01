@@ -21,6 +21,19 @@ const BRANCH_TO_WEIGHT_NOTE: Record<string, string> = {
   NE: 'MAXIMUM WEIGHT TO NEW YORK IS 27 MT - IF SHIPMENT AS ORDERED WILL BE ABOVE THE WEIGHT LIMIT, PLEASE CONTACT US',
 }
 
+const BRANCH_TO_PORT: Record<string, string> = {
+  LA: 'Port of Los Angeles, CA',
+  SAV: 'Port of Savannah, GA',
+  XA: 'Port of Savannah, GA',
+  HOU: 'Port of Houston, TX',
+  TEXAS: 'Port of Houston, TX',
+  NY: 'Port of New York, NJ',
+  NE: 'Port of Newark, NJ',
+  VANC: 'Port of Portland, OR',
+  NOR: 'Port of Norfolk, VA',
+  SEA: 'Port of Seattle, WA',
+}
+
 function decodeWideChars(text: string): string {
   return text.replace(/[\u2000-\uFFFF]/g, (char) => {
     const code = char.charCodeAt(0)
@@ -776,7 +789,7 @@ function extractPOData(text: string, fileName: string) {
     .filter(Boolean)
 
   const vendorName = extractVendor(lines, normalizedText)
-  const shipTo = extractShipTo(lines, normalizedText)
+  const extractedShipTo = extractShipTo(lines, normalizedText)
   const date = extractOrderDate(lines)
   const expShipDate = extractExpShipDate(lines, date)
   const totalAmount = extractTotalAmount(lines, normalizedText)
@@ -785,6 +798,7 @@ function extractPOData(text: string, fileName: string) {
   const rawTableItem = extractRawTableItem(rawLines, totalAmount)
   const freightTerm = extractFreightTerm(normalizedText)
   const branch = extractBranch(normalizedText, poNumber, freightTerm)
+  const shipTo = extractedShipTo || (branch ? BRANCH_TO_PORT[branch] ?? '' : '')
   const notes = extractNotes(rawLines, normalizedText)
 
   const mergedItem = (() => {
