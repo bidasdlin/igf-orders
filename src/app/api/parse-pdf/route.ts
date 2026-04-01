@@ -226,8 +226,19 @@ function extractExpShipDate(lines: string[], orderDate: string): string | undefi
 }
 
 function extractShipTo(lines: string[], text: string): string {
-  const shipMatch = text.match(/Ship To:\s*(Port of [^\n]+)/i)
-  if (shipMatch) return shipMatch[1].trim()
+  const shipLineIndex = lines.findIndex((line) => /^Ship To:/i.test(line))
+  if (shipLineIndex >= 0) {
+    const baseShipTo = lines[shipLineIndex].replace(/^Ship To:\s*/i, '').trim()
+    const nextLine = cleanLine(lines[shipLineIndex + 1] ?? '')
+    if (/^[A-Z]{2}$/.test(nextLine)) {
+      return `${baseShipTo}, ${nextLine}`
+    }
+    const trailingState = nextLine.match(/\b([A-Z]{2})\b\s*$/)?.[1]
+    if (trailingState && /^Supplier:/i.test(nextLine)) {
+      return `${baseShipTo}, ${trailingState}`
+    }
+    if (baseShipTo) return baseShipTo
+  }
 
   const shipIndex = lines.findIndex((line) => line.toUpperCase() === 'SHIP TO')
   if (shipIndex >= 0 && lines[shipIndex + 1]) return lines[shipIndex + 1]
@@ -288,7 +299,7 @@ function extractMoneyValues(text: string): number[] {
 }
 
 function isSectionBoundary(line: string): boolean {
-  return /^(?:QUANTITY|QUA\/TITY|UOM|TOTAL(?: QUANTITY)?|ITEM.?DESCRIPTION|PRICE.?UOM|AMOU.?T|Reference:|Verbal PO:|Ship Via:|Order Date:|Exp Ship Date:|Type:|WH(?:WHType:)?|Frt Term:|HIGH CUBE CY|Page \d+ of \d+|Reprinted:|Supplier:|Ship To:|Account:|Branch:|Phone:|Fax:|Buyer:|Buyer 2:|Confirmed:|W H Confirmed:|Payment Terms:|Due at Receipt of Documentation|Printed:)/i.test(line)
+  return /^(?:QUANTITY|QUA\/TITY|UOM|TOTAL(?: QUANTITY)?|ITEM.?DESCRIPTION|PRICE.?UOM|AMOU.?T|Reference:|Verbal PO:|Ship Via:|Order Date:|Exp Ship Date:|Type:|Frt Term:|HIGH CUBE CY|Page \d+ of \d+|Reprinted:|Supplier:|Ship To:|Account:|Branch:|Phone:|Fax:|Buyer:|Buyer 2:|Confirmed:|W H Confirmed:|Payment Terms:|Due at Receipt of Documentation|Printed:)/i.test(line)
 }
 
 function isValueNoise(line: string): boolean {
@@ -356,7 +367,15 @@ function isLikelyDescriptionLine(line: string): boolean {
 function isArtifactLine(line: string): boolean {
   const compact = normalizeDescriptionLine(line).replace(/[^A-Za-z0-9]/g, '').toUpperCase()
   if (/^\d{7,10}$/.test(compact)) return true
-  return /^(?:NORTHANNDISTRIBUTION(?:CENTER|CTR)INC|FINANCIALNORTHANNCOM|WWWNORTHANNCOM|PURCHASEORDER|POBOX|EUGENEOR|PHONE|FAX|ACCOUNT|BRANCH|SHIPTO|SUPPLIER|MFG|VERBALPO|ORDERDATE|EXPSHIPDATE|REFERENCE|WH|TYPE|PAGE\d+OF\d+|NDC|HIGHCUBECY|DDP[A-Z]*)/.test(compact)
+  return /^(?:NORTHANNDISTRIBUTION(?:CENTER|CTR)INC|FINANCIALNORTHANNCOM|WWWNORTHANNCOM|PURCHASEORDER|POBOX|EUGENEOR|PHONE|FAX|ACCOUNT|BRANCH|SHIPTO|SUPPLIER|MFG|VERBALPO|ORDERDATE|EXPSHIPDATE|REFERENCE|TYPE|PAGE\d+OF\d+|NDC|HIGHCUBECY|DDP[A-Z]*|WHCONFIRMED)$/.test(compact)
+}
+
+function prependMissingSharedLines(sharedLines: string[], itemLines: string[]): string[] {
+  if (sharedLines.length === 0) return dedupeLines(itemLines)
+
+  const existing = new Set(itemLines.map((line) => cleanLine(line)).filter(Boolean))
+  const missingShared = sharedLines.filter((line) => !existing.has(cleanLine(line)))
+  return dedupeLines([...missingShared, ...itemLines])
 }
 
 function extractItemCodeCandidate(line: string): string | null {
@@ -467,6 +486,7 @@ function extractLineItems(lines: string[], totalAmount: number) {
     descriptionLines: string[]
   }> = []
   let pendingDescription: string[] = []
+  const sharedDescriptionLines: string[] = []
   let current: {
     quantity: number
     itemCode: string
@@ -516,7 +536,9 @@ function extractLineItems(lines: string[], totalAmount: number) {
         itemCode: extractItemCodeCandidate(line) ?? '',
         amount: extractAmountFromItemLine(line),
         priceUom: extractPriceUom(line),
-        descriptionLines: pendingDescription,
+        descriptionLines: pendingDescription.length > 0
+          ? pendingDescription
+          : [...sharedDescriptionLines],
       }
       pendingDescription = []
       continue
@@ -534,10 +556,18 @@ function extractLineItems(lines: string[], totalAmount: number) {
       current.descriptionLines.push(normalized)
     } else if (items.length === 0) {
       pendingDescription.push(normalized)
+      sharedDescriptionLines.push(normalized)
     }
   }
 
   flushCurrent()
+
+  if (items.length > 1 && sharedDescriptionLines.length > 0) {
+    const shared = dedupeLines(sharedDescriptionLines)
+    for (const item of items) {
+      item.descriptionLines = prependMissingSharedLines(shared, item.descriptionLines)
+    }
+  }
 
   return items.map((item, index, all) => {
     const amount = item.amount || (all.length === 1 ? totalAmount : 0)
