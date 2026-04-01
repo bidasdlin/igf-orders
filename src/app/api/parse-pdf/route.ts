@@ -343,6 +343,7 @@ function normalizeDescriptionLine(line: string): string {
   return cleanLine(
     line
       .replace(/D\+NE/g, 'D+/E')
+      .replace(/D\+ND\+/g, 'D+/D+')
       .replace(/\bDNE\b/g, 'D/E')
       .replace(/\+N-/g, '+/-')
       .replace(/([A-Za-z0-9])N(?=[A-Za-z0-9])/g, '$1/')
