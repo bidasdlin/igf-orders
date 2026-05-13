@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  AlertCircle,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -62,6 +63,12 @@ interface HistoryPO {
     branch?: string
     freightTerm?: string
   }
+}
+
+interface QuickBooksStatus {
+  state: 'checking' | 'connected' | 'reconnect_required'
+  message: string
+  checkedAt?: string
 }
 
 function buildActivityStamp() {
@@ -147,6 +154,10 @@ function getStatusMeta(status: ParsedPO['status']) {
 
 export function IGFPOProcessor() {
   const [orders, setOrders] = useState<ParsedPO[]>([])
+  const [quickBooksStatus, setQuickBooksStatus] = useState<QuickBooksStatus>({
+    state: 'checking',
+    message: 'Checking QuickBooks',
+  })
   const [isDragging, setIsDragging] = useState(false)
   const [parsingFiles, setParsingFiles] = useState<string[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -185,6 +196,48 @@ export function IGFPOProcessor() {
   useEffect(() => {
     batchSyncRef.current = isBatchSyncing
   }, [isBatchSyncing])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function checkQuickBooks() {
+      try {
+        const res = await fetch('/api/quickbooks/status', { cache: 'no-store' })
+        const data = await res.json()
+        if (cancelled) return
+
+        if (res.ok && data.ok) {
+          setQuickBooksStatus({
+            state: 'connected',
+            message: 'QuickBooks connected',
+            checkedAt: data.checkedAt,
+          })
+          return
+        }
+
+        setQuickBooksStatus({
+          state: 'reconnect_required',
+          message: data.reason || 'QuickBooks reconnect required',
+          checkedAt: data.checkedAt,
+        })
+      } catch {
+        if (!cancelled) {
+          setQuickBooksStatus({
+            state: 'reconnect_required',
+            message: 'QuickBooks status unavailable',
+          })
+        }
+      }
+    }
+
+    checkQuickBooks()
+    const interval = window.setInterval(checkQuickBooks, 5 * 60 * 1000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [])
 
   useEffect(() => {
     const openUpload = () => {
@@ -249,6 +302,8 @@ export function IGFPOProcessor() {
   }
 
   const syncOrder = useCallback(async (order: ParsedPO) => {
+    if (quickBooksStatus.state !== 'connected') return
+
     setOrders((prev) => prev.map((item) => item.id === order.id ? { ...item, status: 'syncing' } : item))
     try {
       const res = await fetch('/api/quickbooks/purchase-orders', {
@@ -290,7 +345,7 @@ export function IGFPOProcessor() {
           : item
       ))
     }
-  }, [])
+  }, [quickBooksStatus.state])
 
   const downloadOrderPdf = useCallback(async (order: ParsedPO) => {
     setDownloadingId(order.id)
@@ -374,6 +429,7 @@ export function IGFPOProcessor() {
   const errors = orders.filter((item) => item.status === 'error').length
   const isSyncing = isBatchSyncing || orders.some((item) => item.status === 'syncing')
   const isProcessing = parsingFiles.length > 0
+  const isQuickBooksReady = quickBooksStatus.state === 'connected'
 
   const summaryCards = [
     {
@@ -532,6 +588,35 @@ export function IGFPOProcessor() {
             <div>
               <div className="eyebrow">Queue control</div>
               <h2 className="section-title mt-4">Review and sync the current batch</h2>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span
+                  className={[
+                    'inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold',
+                    quickBooksStatus.state === 'connected'
+                      ? 'border-[var(--accent-soft)] bg-[var(--accent-soft)] text-[var(--accent)]'
+                      : quickBooksStatus.state === 'checking'
+                        ? 'border-[var(--border)] bg-white/70 text-[var(--muted)]'
+                        : 'border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger)]',
+                  ].join(' ')}
+                >
+                  {quickBooksStatus.state === 'checking' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : quickBooksStatus.state === 'connected' ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <AlertCircle className="h-3.5 w-3.5" />
+                  )}
+                  {quickBooksStatus.message}
+                </span>
+                {quickBooksStatus.state === 'reconnect_required' && (
+                  <a
+                    href="/quickbooks/reconnect"
+                    className="inline-flex items-center rounded-full border border-[var(--border)] bg-white px-3 py-2 text-xs font-semibold text-[var(--ink)] transition hover:-translate-y-0.5"
+                  >
+                    Reconnect
+                  </a>
+                )}
+              </div>
               <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                 {isProcessing
                   ? `${parsingFiles.length} still parsing. Sync queue will continue automatically.`
@@ -543,7 +628,7 @@ export function IGFPOProcessor() {
             </div>
             <button
               onClick={syncAll}
-              disabled={isSyncing || ((parsed === 0 && errors === 0) && !isProcessing)}
+              disabled={!isQuickBooksReady || isSyncing || ((parsed === 0 && errors === 0) && !isProcessing)}
               className="btn-primary disabled:cursor-not-allowed disabled:opacity-55"
             >
               {isSyncing ? (
@@ -622,7 +707,8 @@ export function IGFPOProcessor() {
                       {order.status === 'parsed' && (
                         <button
                           onClick={() => syncOrder(order)}
-                          className="inline-flex items-center gap-2 rounded-full bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5"
+                          disabled={!isQuickBooksReady}
+                          className="inline-flex items-center gap-2 rounded-full bg-[var(--ink)] px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-55"
                         >
                           <Send className="h-4 w-4" />
                           Send to QB
@@ -633,7 +719,8 @@ export function IGFPOProcessor() {
                         <button
                           onClick={() => syncOrder(order)}
                           title={order.error}
-                          className="inline-flex items-center gap-2 rounded-full bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5"
+                          disabled={!isQuickBooksReady}
+                          className="inline-flex items-center gap-2 rounded-full bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-55"
                         >
                           <RefreshCw className="h-4 w-4" />
                           Retry

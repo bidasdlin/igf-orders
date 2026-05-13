@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const QB_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
+const VERCEL_API_TOKEN = process.env.VERCEL_API_TOKEN
+const VERCEL_TEAM_ID = process.env.VERCEL_TEAM_ID
+const VERCEL_PROJECT_ID = process.env.VERCEL_PROJECT_ID || process.env.VERCEL_PROJECT_NAME || 'igf-orders'
 
 function getRedirectUri(request: NextRequest) {
   return `${request.nextUrl.origin}/api/quickbooks/callback`
@@ -99,6 +102,37 @@ function renderPage(title: string, body: string, status = 200) {
   )
 }
 
+async function persistRefreshTokenToVercel(refreshToken: string) {
+  if (!refreshToken) return { ok: false, error: 'Missing refresh token' }
+  if (!VERCEL_API_TOKEN || !VERCEL_PROJECT_ID) {
+    return { ok: false, error: 'Missing Vercel persistence env vars' }
+  }
+
+  const url = new URL(`https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env`)
+  url.searchParams.set('upsert', 'true')
+  if (VERCEL_TEAM_ID) url.searchParams.set('teamId', VERCEL_TEAM_ID)
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${VERCEL_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      key: 'QBO_REFRESH_TOKEN',
+      value: refreshToken,
+      type: 'encrypted',
+      target: ['production', 'preview', 'development'],
+    }),
+  })
+
+  if (!response.ok) {
+    return { ok: false, error: await response.text() }
+  }
+
+  return { ok: true, error: null }
+}
+
 export async function GET(request: NextRequest) {
   const error = request.nextUrl.searchParams.get('error')
   const errorDescription = request.nextUrl.searchParams.get('error_description')
@@ -168,9 +202,15 @@ export async function GET(request: NextRequest) {
 
   const refreshToken = data.refresh_token || ''
   const expiresIn = data.x_refresh_token_expires_in
+  const persisted = await persistRefreshTokenToVercel(refreshToken)
+  const persistMessage = persisted.ok
+    ? '<p>Saved to Vercel automatically.</p>'
+    : '<p class="warn">Could not auto-save to Vercel. Copy manually below.</p>'
+
   const response = renderPage(
     'QuickBooks reconnect complete',
-    `<p>Copy the value below into Vercel as <strong>QBO_REFRESH_TOKEN</strong>.</p>
+    `${persistMessage}
+<p>Copy the value below into Vercel as <strong>QBO_REFRESH_TOKEN</strong> if needed.</p>
 <div class="label">QBO_REFRESH_TOKEN</div>
 <pre>${escapeHtml(refreshToken)}</pre>
 <div class="label">QBO_REALM_ID</div>

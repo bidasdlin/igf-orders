@@ -8,11 +8,44 @@ const CLIENT_ID = process.env.QBO_CLIENT_ID!
 const CLIENT_SECRET = process.env.QBO_CLIENT_SECRET!
 const REALM_ID = process.env.QBO_REALM_ID!
 const REFRESH_TOKEN = process.env.QBO_REFRESH_TOKEN!
+const VERCEL_API_TOKEN = process.env.VERCEL_API_TOKEN
+const VERCEL_TEAM_ID = process.env.VERCEL_TEAM_ID
+const VERCEL_PROJECT_ID = process.env.VERCEL_PROJECT_ID || process.env.VERCEL_PROJECT_NAME || 'igf-orders'
 
 let cachedAccessToken: string | null = null
 let tokenExpiry: number = 0
 let cachedCogsAccount: { value: string; name: string } | null = null
 let currentRefreshToken: string = REFRESH_TOKEN
+let lastPersistedRefreshToken: string | null = null
+
+async function persistRefreshToken(newToken: string) {
+  if (!VERCEL_API_TOKEN || !VERCEL_PROJECT_ID || lastPersistedRefreshToken === newToken) return
+
+  const url = new URL(`https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env`)
+  url.searchParams.set('upsert', 'true')
+  if (VERCEL_TEAM_ID) url.searchParams.set('teamId', VERCEL_TEAM_ID)
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${VERCEL_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      key: 'QBO_REFRESH_TOKEN',
+      value: newToken,
+      type: 'encrypted',
+      target: ['production', 'preview', 'development'],
+    }),
+  })
+
+  if (!response.ok) {
+    console.error('Failed to persist QBO_REFRESH_TOKEN to Vercel:', await response.text())
+    return
+  }
+
+  lastPersistedRefreshToken = newToken
+}
 
 async function getAccessToken(): Promise<string> {
   if (cachedAccessToken && Date.now() < tokenExpiry) {
@@ -37,6 +70,7 @@ async function getAccessToken(): Promise<string> {
   tokenExpiry = Date.now() + (data.expires_in - 60) * 1000
   if (typeof data.refresh_token === 'string' && data.refresh_token.length > 0) {
     currentRefreshToken = data.refresh_token
+    await persistRefreshToken(data.refresh_token)
   }
   return cachedAccessToken!
 }
@@ -150,6 +184,12 @@ export async function createVendor(vendorName: string): Promise<QBVendor> {
     PrintOnCheckName: vendorName,
   })
   return data.Vendor
+}
+
+export async function listVendors(maxResults = 200): Promise<QBVendor[]> {
+  const query = `SELECT * FROM Vendor MAXRESULTS ${maxResults}`
+  const data = await qbRequest('GET', `query?query=${encodeURIComponent(query)}&minorversion=65`)
+  return data.QueryResponse?.Vendor ?? []
 }
 
 export async function getOrCreateVendor(vendorName: string): Promise<QBVendor> {
