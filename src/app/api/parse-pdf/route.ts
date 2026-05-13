@@ -393,12 +393,6 @@ function prependMissingSharedLines(sharedLines: string[], itemLines: string[]): 
 }
 
 function extractItemCodeCandidate(line: string): string | null {
-  const compact = normalizeCompactItemLine(line)
-  const mergedPriceMatch = compact.match(/([A-Z]{2,6}[A-Z0-9]{2,12}?)(?=\d[\d,]*(?:\.\d{2})?(?:N\d[\d,]*(?:\.\d{2})?)?(?:\/|N)[A-Z]{2,10})/i)?.[1]
-  if (mergedPriceMatch) {
-    return mergedPriceMatch.replace(/^(?:UNIT)+/i, '')
-  }
-
   const candidates = cleanLine(line).match(/\b[A-Z0-9]{6,16}\b/g) ?? []
   for (const candidate of candidates) {
     if (!/^[A-Z]/.test(candidate)) continue
@@ -409,6 +403,12 @@ function extractItemCodeCandidate(line: string): string | null {
       continue
     }
     return candidate
+  }
+
+  const compact = normalizeCompactItemLine(line)
+  const mergedPriceMatch = compact.match(/([A-Z]{2,6}[A-Z0-9]{2,12}?)(?=\d[\d,]*(?:\.\d{2})?(?:N\d[\d,]*(?:\.\d{2})?)?(?:\/|N)[A-Z]{2,10})/i)?.[1]
+  if (mergedPriceMatch) {
+    return mergedPriceMatch.replace(/^(?:UNIT)+/i, '')
   }
 
   return null
