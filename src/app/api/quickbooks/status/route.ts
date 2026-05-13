@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { listVendors } from '@/lib/quickbooks'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 function getReconnectReason(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   if (message.includes('invalid_grant') || message.includes('QB token refresh failed')) {
@@ -12,11 +15,18 @@ function getReconnectReason(error: unknown) {
 export async function GET() {
   try {
     await listVendors(1)
-    return NextResponse.json({
-      ok: true,
-      status: 'connected',
-      checkedAt: new Date().toISOString(),
-    })
+    return NextResponse.json(
+      {
+        ok: true,
+        status: 'connected',
+        checkedAt: new Date().toISOString(),
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+      },
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json(
@@ -27,7 +37,12 @@ export async function GET() {
         error: message,
         checkedAt: new Date().toISOString(),
       },
-      { status: 503 },
+      {
+        status: 503,
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+      },
     )
   }
 }

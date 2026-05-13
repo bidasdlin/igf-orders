@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createVendor, listVendors } from '@/lib/quickbooks'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET() {
   try {
     const vendors = await listVendors(200)
@@ -9,9 +12,15 @@ export async function GET() {
       name: vendor.DisplayName,
     }))
 
-    return NextResponse.json({ count: normalized.length, vendors: normalized })
+    return NextResponse.json(
+      { count: normalized.length, vendors: normalized },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    return NextResponse.json(
+      { error: String(err) },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
+    )
   }
 }
 
