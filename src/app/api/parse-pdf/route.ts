@@ -150,16 +150,32 @@ function normalizeDateCandidate(value: string): string | null {
 }
 
 function extractVendor(lines: string[], text: string): string {
+  if (
+    lines[0] &&
+    /^Page \d+ of \d+$/i.test(lines[1] ?? '') &&
+    !/^Northann Distribution (?:Ctr|Center) Inc\.?$/i.test(lines[0]) &&
+    /[A-Za-z]/.test(lines[0])
+  ) {
+    return lines[0]
+  }
+
   const mfgLine = lines.find((line) => /^(?:mfg|mgf)\s+/i.test(line))
   if (mfgLine) return mfgLine.replace(/^(?:mfg|mgf)\s+/i, '').trim()
 
   const supplierIndex = lines.findIndex((line) => /^Supplier:/i.test(line))
   if (supplierIndex >= 0) {
-    const supplierBlock = lines
-      .slice(supplierIndex, Math.min(lines.length, supplierIndex + 8))
-      .map((line, index) => index === 0 ? line.replace(/^Supplier:\s*/i, '').trim() : line.trim())
-      .filter(Boolean)
-      .filter((line) => !/^(?:Printed:|Reprinted:|Page \d+ of \d+|QUANTITY|TOTAL|UOM|ITEM|Ship To:|Reference:|Order Date:|Exp Ship Date:|Type:|Buyer:|Buyer 2:|Confirmed:|W H|Phone:|Fax:|Account:|Branch:)/i.test(line))
+    const supplierBlock: string[] = []
+    for (let i = supplierIndex; i < Math.min(lines.length, supplierIndex + 8); i++) {
+      const candidate = i === supplierIndex
+        ? lines[i].replace(/^Supplier:\s*/i, '').trim()
+        : lines[i].trim()
+
+      if (!candidate) continue
+      if (/^(?:Printed:|Reprinted:|Page \d+ of \d+|QUANTITY|TOTAL|UOM|ITEM|Ship To:|Reference:|Order Date:|Exp Ship Date:|Type:|Buyer:|Buyer 2:|Confirmed:|W H|Phone:|Fax:|Account:|Branch:)/i.test(candidate)) {
+        break
+      }
+      supplierBlock.push(candidate)
+    }
 
     const supplierManufacturer = supplierBlock.find((line) => /^(?:mfg|mgf)\s+/i.test(line))
     if (supplierManufacturer) {
