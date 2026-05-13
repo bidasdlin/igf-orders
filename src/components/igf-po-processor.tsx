@@ -152,6 +152,40 @@ function getStatusMeta(status: ParsedPO['status']) {
   }
 }
 
+function QuickBooksStatusBadge({ status }: { status: QuickBooksStatus }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span
+        className={[
+          'inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold',
+          status.state === 'connected'
+            ? 'border-[var(--accent-soft)] bg-[var(--accent-soft)] text-[var(--accent)]'
+            : status.state === 'checking'
+              ? 'border-[var(--border)] bg-white/70 text-[var(--muted)]'
+              : 'border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger)]',
+        ].join(' ')}
+      >
+        {status.state === 'checking' ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : status.state === 'connected' ? (
+          <CheckCircle2 className="h-3.5 w-3.5" />
+        ) : (
+          <AlertCircle className="h-3.5 w-3.5" />
+        )}
+        {status.message}
+      </span>
+      {status.state === 'reconnect_required' && (
+        <a
+          href="/quickbooks/reconnect"
+          className="inline-flex items-center rounded-full border border-[var(--border)] bg-white px-3 py-2 text-xs font-semibold text-[var(--ink)] transition hover:-translate-y-0.5"
+        >
+          Reconnect
+        </a>
+      )}
+    </div>
+  )
+}
+
 export function IGFPOProcessor() {
   const [orders, setOrders] = useState<ParsedPO[]>([])
   const [quickBooksStatus, setQuickBooksStatus] = useState<QuickBooksStatus>({
@@ -492,7 +526,10 @@ export function IGFPOProcessor() {
 
           <div className="flex h-full flex-col justify-between gap-8">
             <div className="max-w-2xl">
-              <div className="eyebrow">Upload PO PDFs</div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="eyebrow">Upload PO PDFs</div>
+                <QuickBooksStatusBadge status={quickBooksStatus} />
+              </div>
               {isProcessing ? (
                 <div className="mt-6 flex flex-col gap-4">
                   <div className="inline-flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--warm-soft)] text-[var(--warm)]">
@@ -588,34 +625,8 @@ export function IGFPOProcessor() {
             <div>
               <div className="eyebrow">Queue control</div>
               <h2 className="section-title mt-4">Review and sync the current batch</h2>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span
-                  className={[
-                    'inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold',
-                    quickBooksStatus.state === 'connected'
-                      ? 'border-[var(--accent-soft)] bg-[var(--accent-soft)] text-[var(--accent)]'
-                      : quickBooksStatus.state === 'checking'
-                        ? 'border-[var(--border)] bg-white/70 text-[var(--muted)]'
-                        : 'border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger)]',
-                  ].join(' ')}
-                >
-                  {quickBooksStatus.state === 'checking' ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : quickBooksStatus.state === 'connected' ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  ) : (
-                    <AlertCircle className="h-3.5 w-3.5" />
-                  )}
-                  {quickBooksStatus.message}
-                </span>
-                {quickBooksStatus.state === 'reconnect_required' && (
-                  <a
-                    href="/quickbooks/reconnect"
-                    className="inline-flex items-center rounded-full border border-[var(--border)] bg-white px-3 py-2 text-xs font-semibold text-[var(--ink)] transition hover:-translate-y-0.5"
-                  >
-                    Reconnect
-                  </a>
-                )}
+              <div className="mt-3">
+                <QuickBooksStatusBadge status={quickBooksStatus} />
               </div>
               <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                 {isProcessing

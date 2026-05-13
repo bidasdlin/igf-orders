@@ -425,6 +425,18 @@ function normalizeRepeatedDigits(value: string): string {
   return compact
 }
 
+function normalizeQuantityCandidate(value: string): number {
+  const compact = value.replace(/\s+/g, '')
+  const normalized = compact.startsWith('.') ? `0${compact}` : compact
+  if (normalized.includes('.')) {
+    const quantity = Number(normalized)
+    return Number.isFinite(quantity) ? quantity : 0
+  }
+
+  const quantity = Number(normalizeRepeatedDigits(normalized))
+  return Number.isFinite(quantity) ? quantity : 0
+}
+
 function normalizeRepeatedMoney(value: string): string {
   const compact = value.replace(/\s+/g, '')
   const match = compact.match(/^([\d,]+)(\.\d{2})$/)
@@ -454,16 +466,16 @@ function normalizeCompactItemLine(line: string): string {
 
 function extractQuantityFromItemLine(line: string): number {
   const compact = normalizeCompactItemLine(line)
-  const leading = compact.match(/^(\d+)(?:UNIT|U\/IT)/i)?.[1]
+  const leading = compact.match(/^((?:\d+|\.\d+|\d+\.\d+))(?:UNIT|U\/IT)/i)?.[1]
   if (leading) {
-    const quantity = Number(normalizeRepeatedDigits(leading))
-    if (Number.isFinite(quantity)) return quantity
+    const quantity = normalizeQuantityCandidate(leading)
+    if (quantity > 0) return quantity
   }
 
-  const rateQuantity = compact.match(/(\d+)\.00\/(?:UNIT|U\/IT)/i)?.[1]
+  const rateQuantity = compact.match(/((?:\d+|\.\d+|\d+\.\d+))(?:\.00)?\/(?:UNIT|U\/IT)/i)?.[1]
   if (rateQuantity) {
-    const quantity = Number(normalizeRepeatedDigits(rateQuantity))
-    if (Number.isFinite(quantity)) return quantity
+    const quantity = normalizeQuantityCandidate(rateQuantity)
+    if (quantity > 0) return quantity
   }
 
   return 0
