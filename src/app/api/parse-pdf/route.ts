@@ -396,7 +396,7 @@ function extractItemCodeCandidate(line: string): string | null {
   const compact = normalizeCompactItemLine(line)
   const compactUnitMatch = compact.match(/UNIT([A-Z]{2,6}[A-Z0-9]*?\d[A-Z0-9]*?)(?=(?:\d+|\.\d+)(?:\.00)?\/UNIT)/i)?.[1]
   if (compactUnitMatch) {
-    return compactUnitMatch
+    return normalizeItemCode(compactUnitMatch)
   }
 
   const candidates = cleanLine(line).match(/\b[A-Z0-9]{6,16}\b/g) ?? []
@@ -408,15 +408,21 @@ function extractItemCodeCandidate(line: string): string | null {
     if (/^(?:ACCOUNT|AMOUNT|BRANCH|BUYER|CONFIRMED|ORDER|PAGE|PHONE|PORTLAND|PRINTED|QUANTITY|REFERENCE|SHIP|SUBTOTAL|SUPPLIER|TOTAL|UNIT|VENDOR|VERBAL|WEIGHT)$/i.test(candidate)) {
       continue
     }
-    return candidate
+    return normalizeItemCode(candidate)
   }
 
   const mergedPriceMatch = compact.match(/([A-Z]{2,6}[A-Z0-9]{2,12}?)(?=\d[\d,]*(?:\.\d{2})?(?:N\d[\d,]*(?:\.\d{2})?)?(?:\/|N)[A-Z]{2,10})/i)?.[1]
   if (mergedPriceMatch) {
-    return mergedPriceMatch.replace(/^(?:UNIT)+/i, '')
+    return normalizeItemCode(mergedPriceMatch.replace(/^(?:UNIT)+/i, ''))
   }
 
   return null
+}
+
+function normalizeItemCode(value: string): string {
+  const candidate = value.trim()
+  const priceJoined = candidate.match(/^([A-Z]{2,}\d{2,}[A-Z]{1,3})\d{2,}$/i)?.[1]
+  return priceJoined ?? candidate
 }
 
 function normalizeRepeatedDigits(value: string): string {
@@ -577,6 +583,17 @@ function extractLineItems(lines: string[], totalAmount: number) {
 
     if (normalized === '-') {
       continue
+    }
+
+    if (current) {
+      const amount = extractAmountFromItemLine(line)
+      const priceUom = extractPriceUom(line)
+      if (amount > 0 && (!current.amount || Math.abs(amount - current.amount) > 0.01)) {
+        current.amount = amount
+      }
+      if (priceUom && !current.priceUom) {
+        current.priceUom = priceUom
+      }
     }
 
     if (!isLikelyDescriptionLine(line)) {
