@@ -159,7 +159,7 @@ function extractVendor(lines: string[], text: string): string {
       .slice(supplierIndex, Math.min(lines.length, supplierIndex + 8))
       .map((line, index) => index === 0 ? line.replace(/^Supplier:\s*/i, '').trim() : line.trim())
       .filter(Boolean)
-      .filter((line) => !/^(?:Reprinted:|Page \d+ of \d+|Ship To:|Reference:|Order Date:|Exp Ship Date:|Type:|Buyer:|Buyer 2:|Confirmed:|W H|Phone:|Fax:|Account:|Branch:)/i.test(line))
+      .filter((line) => !/^(?:Printed:|Reprinted:|Page \d+ of \d+|QUANTITY|TOTAL|UOM|ITEM|Ship To:|Reference:|Order Date:|Exp Ship Date:|Type:|Buyer:|Buyer 2:|Confirmed:|W H|Phone:|Fax:|Account:|Branch:)/i.test(line))
 
     const supplierManufacturer = supplierBlock.find((line) => /^(?:mfg|mgf)\s+/i.test(line))
     if (supplierManufacturer) {
@@ -181,9 +181,21 @@ function extractVendor(lines: string[], text: string): string {
   }
 
   const supplierMatch = text.match(/Supplier:\s*([^\n]+)/i)?.[1]?.trim()
-  if (supplierMatch && !/^Northann Distribution (?:Ctr|Center) Inc\.?$/i.test(supplierMatch)) {
+  if (
+    supplierMatch &&
+    !/^Northann Distribution (?:Ctr|Center) Inc\.?$/i.test(supplierMatch) &&
+    !/^(?:Printed:|Reprinted:|Page \d+ of \d+|QUANTITY|TOTAL|UOM|ITEM)/i.test(supplierMatch)
+  ) {
     return supplierMatch
   }
+
+  const firstBusinessLine = lines.find((line) =>
+    line &&
+    !/^Northann Distribution (?:Ctr|Center) Inc\.?$/i.test(line) &&
+    !/^(?:Page \d+ of \d+|Verbal PO:|PO Box|Eugene,|Phone:|Ship To:|Account:|Branch:|Fax:|PURCHASE\s*ORDER|Printed:|Reprinted:|QUANTITY|TOTAL|UOM|ITEM)/i.test(line) &&
+    /[A-Za-z]/.test(line)
+  )
+  if (firstBusinessLine) return firstBusinessLine
 
   const manufacturerMatch = text.match(/(?:^|\n)\s*(?:mfg|mgf)\s+([^\n]+)/i)?.[1]?.trim()
   return manufacturerMatch || 'Unknown Vendor'
@@ -421,6 +433,9 @@ function extractItemCodeCandidate(line: string): string | null {
 
 function normalizeItemCode(value: string): string {
   const candidate = value.trim()
+  const trailingPriceDigit = candidate.match(/^([A-Z]{2,}\d{2,}[A-Z]{2,})\d$/i)?.[1]
+  if (trailingPriceDigit) return trailingPriceDigit
+
   const priceJoined = candidate.match(/^([A-Z]{2,}\d{2,}[A-Z]{1,3})\d{2,}$/i)?.[1]
   return priceJoined ?? candidate
 }
@@ -618,7 +633,9 @@ function extractLineItems(lines: string[], totalAmount: number) {
   }
 
   return items.map((item, index, all) => {
-    const amount = item.amount || (all.length === 1 ? totalAmount : 0)
+    const amount = all.length === 1 && totalAmount > 0 && Math.abs(totalAmount - item.amount) > 0.01
+      ? totalAmount
+      : item.amount || (all.length === 1 ? totalAmount : 0)
     return {
       description: `${item.quantity} Units ${item.itemCode} — ${item.descriptionLines.join('\n')}`,
       quantity: item.quantity,
