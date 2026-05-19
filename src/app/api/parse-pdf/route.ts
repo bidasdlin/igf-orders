@@ -427,6 +427,11 @@ function extractItemCodeCandidate(line: string): string | null {
     return normalizeItemCode(compactUnitMatch)
   }
 
+  const compactPriceMatch = compact.match(/UNIT([A-Z]{2,8}\d{2,}[A-Z]{2,})(?=\d[\d,]*\.\d{2}\/[A-Z]{2,10})/i)?.[1]
+  if (compactPriceMatch) {
+    return normalizeItemCode(compactPriceMatch)
+  }
+
   const candidates = cleanLine(line).match(/\b[A-Z0-9]{6,16}\b/g) ?? []
   for (const candidate of candidates) {
     if (!/^[A-Z]/.test(candidate)) continue
