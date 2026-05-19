@@ -543,6 +543,13 @@ function extractAmountFromItemLine(line: string): number {
   return amounts.length > 0 ? amounts[amounts.length - 1] : 0
 }
 
+function isNumericContinuationLine(line: string): boolean {
+  const normalized = normalizeDescriptionLine(line)
+  if (!normalized || /[A-Za-z]/.test(normalized)) return false
+  if (!/[\d,]+\.\d{2}/.test(normalized)) return false
+  return true
+}
+
 function isPotentialItemLine(line: string): boolean {
   return extractQuantityFromItemLine(line) > 0 && Boolean(extractItemCodeCandidate(line))
 }
@@ -621,10 +628,10 @@ function extractLineItems(lines: string[], totalAmount: number) {
       continue
     }
 
-    if (current) {
+    if (current && !current.amount && isNumericContinuationLine(line)) {
       const amount = extractAmountFromItemLine(line)
       const priceUom = extractPriceUom(line)
-      if (amount > 0 && (!current.amount || Math.abs(amount - current.amount) > 0.01)) {
+      if (amount > 0) {
         current.amount = amount
       }
       if (priceUom && !current.priceUom) {
