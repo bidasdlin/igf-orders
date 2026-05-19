@@ -18,6 +18,56 @@ let cachedCogsAccount: { value: string; name: string } | null = null
 let currentRefreshToken: string = REFRESH_TOKEN
 let lastPersistedRefreshToken: string | null = null
 
+async function fetchWithTimeout(url: string | URL, init: RequestInit = {}, timeoutMs = 12000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: init.signal ?? controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function fetchLatestRefreshTokenFromVercel() {
+  if (!VERCEL_API_TOKEN || !VERCEL_PROJECT_ID) return null
+
+  const listUrl = new URL(`https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env`)
+  if (VERCEL_TEAM_ID) listUrl.searchParams.set('teamId', VERCEL_TEAM_ID)
+
+  const listResponse = await fetchWithTimeout(listUrl, {
+    headers: {
+      Authorization: `Bearer ${VERCEL_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  }, 8000)
+
+  if (!listResponse.ok) return null
+
+  const listData = await listResponse.json()
+  const refreshEnv = listData.envs?.find?.((entry: { key?: string; id?: string }) => entry.key === 'QBO_REFRESH_TOKEN')
+  if (!refreshEnv?.id) return null
+
+  const valueUrl = new URL(`https://api.vercel.com/v1/projects/${VERCEL_PROJECT_ID}/env/${refreshEnv.id}`)
+  if (VERCEL_TEAM_ID) valueUrl.searchParams.set('teamId', VERCEL_TEAM_ID)
+
+  const valueResponse = await fetchWithTimeout(valueUrl, {
+    headers: {
+      Authorization: `Bearer ${VERCEL_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  }, 8000)
+
+  if (!valueResponse.ok) return null
+
+  const valueData = await valueResponse.json()
+  return typeof valueData.value === 'string' && valueData.value.startsWith('RT1-')
+    ? valueData.value
+    : null
+}
+
 async function persistRefreshToken(newToken: string) {
   if (!VERCEL_API_TOKEN || !VERCEL_PROJECT_ID || lastPersistedRefreshToken === newToken) return
 
@@ -25,7 +75,7 @@ async function persistRefreshToken(newToken: string) {
   url.searchParams.set('upsert', 'true')
   if (VERCEL_TEAM_ID) url.searchParams.set('teamId', VERCEL_TEAM_ID)
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${VERCEL_API_TOKEN}`,
@@ -37,7 +87,7 @@ async function persistRefreshToken(newToken: string) {
       type: 'encrypted',
       target: ['production', 'preview', 'development'],
     }),
-  })
+  }, 8000)
 
   if (!response.ok) {
     console.error('Failed to persist QBO_REFRESH_TOKEN to Vercel:', await response.text())
@@ -51,8 +101,14 @@ async function getAccessToken(): Promise<string> {
   if (cachedAccessToken && Date.now() < tokenExpiry) {
     return cachedAccessToken
   }
+
+  const latestRefreshToken = await fetchLatestRefreshTokenFromVercel().catch(() => null)
+  if (latestRefreshToken) {
+    currentRefreshToken = latestRefreshToken
+  }
+
   const credentials = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')
-  const response = await fetch(QBO_TOKEN_URL, {
+  const response = await fetchWithTimeout(QBO_TOKEN_URL, {
     method: 'POST',
     headers: {
       'Authorization': `Basic ${credentials}`,
@@ -60,7 +116,7 @@ async function getAccessToken(): Promise<string> {
       'Accept': 'application/json',
     },
     body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: currentRefreshToken }),
-  })
+  }, 12000)
   if (!response.ok) {
     const error = await response.text()
     throw new Error(`QB token refresh failed: ${error}`)
@@ -78,7 +134,7 @@ async function getAccessToken(): Promise<string> {
 async function qbRequest(method: string, endpoint: string, body?: object) {
   const token = await getAccessToken()
   const url = `${QBO_BASE_URL}/${REALM_ID}/${endpoint}`
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method,
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -86,7 +142,7 @@ async function qbRequest(method: string, endpoint: string, body?: object) {
       'Accept': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
-  })
+  }, 12000)
   if (!response.ok) {
     const error = await response.text()
     throw new Error(`QB API error [${response.status}]: ${error}`)
