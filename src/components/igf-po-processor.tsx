@@ -127,6 +127,16 @@ function formatMoney(value: number) {
   })}`
 }
 
+function hasParseIssue(po: { lineItems?: LineItem[]; totalAmount?: number }) {
+  const lineItems = po.lineItems ?? []
+  if (lineItems.length === 0) return true
+  if (lineItems.some((item) => item.description.startsWith('Unable to recover full line item details'))) return true
+  if (typeof po.totalAmount !== 'number' || po.totalAmount <= 0) return true
+
+  const lineTotal = lineItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+  return Math.abs(lineTotal - po.totalAmount) > 0.05
+}
+
 function getStatusMeta(order: ParsedPO) {
   const status = order.status
 
@@ -308,15 +318,13 @@ export function IGFPOProcessor() {
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const data = await res.json()
       if (!data.success) throw new Error(data.error || 'Parse failed')
-      const hasIncompleteDetails = data.po.lineItems?.some((item: LineItem) =>
-        item.description.startsWith('Unable to recover full line item details'),
-      )
+      const parseIssue = hasParseIssue(data.po)
       const po: ParsedPO = {
         ...data.po,
         id: tempId,
         fileName: file.name,
-        status: hasIncompleteDetails ? 'error' : 'parsed',
-        error: hasIncompleteDetails ? 'Full line item details could not be recovered from the source PDF.' : undefined,
+        status: parseIssue ? 'error' : 'parsed',
+        error: parseIssue ? 'Parsed line items do not match the PO total. Please inspect details.' : undefined,
       }
       setOrders((prev) => {
         const index = prev.findIndex((item) => item.poNumber === po.poNumber)
