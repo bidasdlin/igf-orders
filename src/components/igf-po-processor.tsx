@@ -40,6 +40,7 @@ interface ParsedPO {
   qbId?: string
   qbDocNumber?: string
   error?: string
+  warning?: string
   syncedAt?: string
 }
 
@@ -127,20 +128,24 @@ function formatMoney(value: number) {
   })}`
 }
 
-function getParseIssue(po: { lineItems?: LineItem[]; totalAmount?: number }) {
+function getParseCheck(po: { lineItems?: LineItem[]; totalAmount?: number }) {
   const lineItems = po.lineItems ?? []
-  if (lineItems.length === 0) return 'No line items were recovered from the PDF.'
+  if (lineItems.length === 0) return { error: 'No line items were recovered from the PDF.' }
   if (lineItems.some((item) => item.description.startsWith('Unable to recover full line item details'))) {
-    return 'Full line item details could not be recovered from the source PDF.'
+    return { error: 'Full line item details could not be recovered from the source PDF.' }
   }
-  if (typeof po.totalAmount !== 'number' || po.totalAmount <= 0) return 'PO total amount was not recovered from the PDF.'
+  if (typeof po.totalAmount !== 'number' || po.totalAmount <= 0) {
+    return { error: 'PO total amount was not recovered from the PDF.' }
+  }
 
   const lineTotal = lineItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
   if (Math.abs(lineTotal - po.totalAmount) > 0.05) {
-    return `Line item total ${formatMoney(lineTotal)} does not match PO total ${formatMoney(po.totalAmount)}.`
+    return {
+      warning: `Line item total ${formatMoney(lineTotal)} does not match PO total ${formatMoney(po.totalAmount)}. Please inspect details before syncing.`,
+    }
   }
 
-  return null
+  return {}
 }
 
 function getStatusMeta(order: ParsedPO) {
@@ -324,13 +329,14 @@ export function IGFPOProcessor() {
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const data = await res.json()
       if (!data.success) throw new Error(data.error || 'Parse failed')
-      const parseIssue = getParseIssue(data.po)
+      const parseCheck = getParseCheck(data.po)
       const po: ParsedPO = {
         ...data.po,
         id: tempId,
         fileName: file.name,
-        status: parseIssue ? 'error' : 'parsed',
-        error: parseIssue ?? undefined,
+        status: parseCheck.error ? 'error' : 'parsed',
+        error: parseCheck.error,
+        warning: parseCheck.warning,
       }
       setOrders((prev) => {
         const index = prev.findIndex((item) => item.poNumber === po.poNumber)
@@ -737,6 +743,12 @@ export function IGFPOProcessor() {
                       </div>
                     </div>
 
+                    {order.status !== 'error' && order.warning && (
+                      <p className="max-w-xl text-xs leading-5 text-[var(--warm)] xl:hidden">
+                        {order.warning}
+                      </p>
+                    )}
+
                     {order.status === 'error' && order.error && (
                       <p className="max-w-xl text-xs leading-5 text-[var(--danger)] xl:hidden">
                         {order.error}
@@ -808,6 +820,11 @@ export function IGFPOProcessor() {
                         {order.status === 'error' && order.error && (
                           <div className="mb-4 rounded-[18px] border border-[var(--danger-soft)] bg-[var(--danger-soft)] px-4 py-3 text-sm font-semibold text-[var(--danger)]">
                             {order.error}
+                          </div>
+                        )}
+                        {order.status !== 'error' && order.warning && (
+                          <div className="mb-4 rounded-[18px] border border-[var(--warm-soft)] bg-[var(--warm-soft)] px-4 py-3 text-sm font-semibold text-[var(--warm)]">
+                            {order.warning}
                           </div>
                         )}
                         <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
