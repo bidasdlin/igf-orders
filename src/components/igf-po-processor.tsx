@@ -127,7 +127,9 @@ function formatMoney(value: number) {
   })}`
 }
 
-function getStatusMeta(status: ParsedPO['status']) {
+function getStatusMeta(order: ParsedPO) {
+  const status = order.status
+
   switch (status) {
     case 'parsed':
       return {
@@ -145,8 +147,20 @@ function getStatusMeta(status: ParsedPO['status']) {
         className: 'border-[var(--accent-soft)] bg-[var(--accent-soft)] text-[var(--accent)]',
       }
     case 'error':
+      if (order.error?.toLowerCase().includes('quickbooks') || order.error?.toLowerCase().includes('qb ')) {
+        return {
+          label: 'QuickBooks issue',
+          className: 'border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger)]',
+        }
+      }
+      if (order.error?.toLowerCase().includes('pdf export')) {
+        return {
+          label: 'PDF issue',
+          className: 'border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger)]',
+        }
+      }
       return {
-        label: 'Needs review',
+        label: 'Parse issue',
         className: 'border-[var(--danger-soft)] bg-[var(--danger-soft)] text-[var(--danger)]',
       }
   }
@@ -672,7 +686,7 @@ export function IGFPOProcessor() {
 
           <div className="mt-5 space-y-4">
             {orders.map((order) => {
-              const statusMeta = getStatusMeta(order.status)
+              const statusMeta = getStatusMeta(order)
               return (
                 <article key={order.id} className="rounded-[24px] border border-[var(--border)] bg-[rgba(255,255,255,0.76)] p-5">
                   <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
