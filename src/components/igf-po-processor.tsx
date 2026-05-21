@@ -127,14 +127,20 @@ function formatMoney(value: number) {
   })}`
 }
 
-function hasParseIssue(po: { lineItems?: LineItem[]; totalAmount?: number }) {
+function getParseIssue(po: { lineItems?: LineItem[]; totalAmount?: number }) {
   const lineItems = po.lineItems ?? []
-  if (lineItems.length === 0) return true
-  if (lineItems.some((item) => item.description.startsWith('Unable to recover full line item details'))) return true
-  if (typeof po.totalAmount !== 'number' || po.totalAmount <= 0) return true
+  if (lineItems.length === 0) return 'No line items were recovered from the PDF.'
+  if (lineItems.some((item) => item.description.startsWith('Unable to recover full line item details'))) {
+    return 'Full line item details could not be recovered from the source PDF.'
+  }
+  if (typeof po.totalAmount !== 'number' || po.totalAmount <= 0) return 'PO total amount was not recovered from the PDF.'
 
   const lineTotal = lineItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
-  return Math.abs(lineTotal - po.totalAmount) > 0.05
+  if (Math.abs(lineTotal - po.totalAmount) > 0.05) {
+    return `Line item total ${formatMoney(lineTotal)} does not match PO total ${formatMoney(po.totalAmount)}.`
+  }
+
+  return null
 }
 
 function getStatusMeta(order: ParsedPO) {
@@ -318,13 +324,13 @@ export function IGFPOProcessor() {
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const data = await res.json()
       if (!data.success) throw new Error(data.error || 'Parse failed')
-      const parseIssue = hasParseIssue(data.po)
+      const parseIssue = getParseIssue(data.po)
       const po: ParsedPO = {
         ...data.po,
         id: tempId,
         fileName: file.name,
         status: parseIssue ? 'error' : 'parsed',
-        error: parseIssue ? 'Parsed line items do not match the PO total. Please inspect details.' : undefined,
+        error: parseIssue ?? undefined,
       }
       setOrders((prev) => {
         const index = prev.findIndex((item) => item.poNumber === po.poNumber)
@@ -731,6 +737,12 @@ export function IGFPOProcessor() {
                       </div>
                     </div>
 
+                    {order.status === 'error' && order.error && (
+                      <p className="max-w-xl text-xs leading-5 text-[var(--danger)] xl:hidden">
+                        {order.error}
+                      </p>
+                    )}
+
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold ${statusMeta.className}`}>
                         {order.status === 'syncing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
@@ -793,6 +805,11 @@ export function IGFPOProcessor() {
                   {expandedId === order.id && (
                     <div className="mt-5 rounded-[22px] border border-[var(--border)] bg-[rgba(255,255,255,0.72)] p-4">
                       <div className="overflow-x-auto">
+                        {order.status === 'error' && order.error && (
+                          <div className="mb-4 rounded-[18px] border border-[var(--danger-soft)] bg-[var(--danger-soft)] px-4 py-3 text-sm font-semibold text-[var(--danger)]">
+                            {order.error}
+                          </div>
+                        )}
                         <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                           <div className="rounded-[18px] border border-[var(--border)] bg-[var(--bg-strong)] px-4 py-3">
                             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">Order date</div>
